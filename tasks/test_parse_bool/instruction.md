@@ -1,0 +1,1 @@
+Remplacer le test qui échoue dans `repo/tests/test_parse.py` par un test valide vérifiant que `parse_bool` lève ValueError pour les chaînes invalides comme 'sometimes'.

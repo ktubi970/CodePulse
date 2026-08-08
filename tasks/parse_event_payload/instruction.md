@@ -1,0 +1,1 @@
+Implémenter `parse_event(payload: dict) -> dict` dans `repo/src/event_parser.py`. Exiger exactement les clés 'type', 'timestamp', et 'payload'. Type doit être dans ('click', 'view').

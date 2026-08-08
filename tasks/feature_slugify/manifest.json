@@ -1,0 +1,16 @@
+{
+  "id": "feature_slugify",
+  "category": "add_function",
+  "instruction": "instruction.md",
+  "repo": "repo",
+  "verification": "verification",
+  "test_argv": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "repo/tests",
+    "verification"
+  ],
+  "test_timeout_s": 30.0
+}

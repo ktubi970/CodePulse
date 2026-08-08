@@ -1,0 +1,16 @@
+{
+  "id": "test_safe_divide",
+  "category": "write_test",
+  "instruction": "instruction.md",
+  "repo": "repo",
+  "verification": "verification",
+  "test_argv": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "repo/tests",
+    "verification"
+  ],
+  "test_timeout_s": 30.0
+}

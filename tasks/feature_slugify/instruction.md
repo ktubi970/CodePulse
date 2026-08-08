@@ -1,0 +1,1 @@
+Implémenter `slugify(text: str) -> str` dans `repo/src/slug.py`. Convertir en minuscules, remplacer les caractères non-alphanumériques par des tirets uniques et supprimer les tirets en bordure.

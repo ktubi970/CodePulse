@@ -1,0 +1,1 @@
+Implémenter `clean_contacts(csv_text: str) -> str` dans `repo/src/clean.py` : nettoyer, minusculiser et dédoublonner les emails, supprimer les lignes sans email valide, retourner un CSV valide 'name,email'.

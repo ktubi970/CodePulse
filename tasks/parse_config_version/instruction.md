@@ -1,0 +1,1 @@
+Implémenter `parse_config(dict_data: dict) -> dict` dans `repo/src/config_parser.py`. Exiger `version == 2` (entier), champ `name` non vide, et rejeter toute clé supérieure inconnue avec ValueError.

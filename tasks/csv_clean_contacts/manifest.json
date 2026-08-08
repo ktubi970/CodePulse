@@ -1,0 +1,16 @@
+{
+  "id": "csv_clean_contacts",
+  "category": "csv",
+  "instruction": "instruction.md",
+  "repo": "repo",
+  "verification": "verification",
+  "test_argv": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "repo/tests",
+    "verification"
+  ],
+  "test_timeout_s": 30.0
+}

@@ -1,0 +1,1 @@
+Implémenter `chunked(values, size: int)` dans `repo/src/chunk.py` pour découper tout itérable en tuples de longueur `size`. Lever ValueError pour size <= 0.
