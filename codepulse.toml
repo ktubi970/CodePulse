@@ -2,7 +2,22 @@
 base_url = "http://127.0.0.1:11434"
 
 [benchmark]
-models = ["qwen2.5:1.5b", "qwen3:1.7b", "smollm2:1.7b"]
+models = [
+    "qwen2.5-coder:0.5b",
+    "qwen2.5-coder:1.5b",
+    "qwen2.5-coder:3b",
+    "deepseek-coder:1.3b",
+    "starcoder2:3b",
+    "codegemma:2b",
+    "granite-code:3b",
+    "smollm2:1.7b",
+    "qwen3:0.6b",
+    "qwen3:1.7b",
+    "gemma3:1b",
+    "llama3.2:1b",
+    "qwen2.5:1.5b",
+    "gemma2:2b"
+]
 tasks = []
 result_db = "results/codepulse.sqlite3"
 temperature = 0.0
