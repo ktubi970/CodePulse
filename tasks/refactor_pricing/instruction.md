@@ -1,1 +1,1 @@
-Extraire la fonction `discount_rate(customer_kind: str, subtotal: float) -> float` dans `repo/src/pricing.py` tout en préservant le comportement du calcul de prix total.
+Extraire la fonction `discount_rate(customer_kind: str, subtotal: float) -> float` dans `src/pricing.py` tout en préservant le comportement du calcul de prix total.

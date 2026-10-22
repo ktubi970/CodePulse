@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,9 +8,10 @@ version = "0.1.0"
 description = "A reproducible, visual, local benchmark for small language models acting as coding agents via Ollama."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
-    { name = "CodePulse Local Contributors" }
+    { name = "Krikor Tchepidjian" }
 ]
 dependencies = [
     "streamlit>=1.40",
@@ -24,6 +25,9 @@ test = [
 
 [project.scripts]
 codepulse = "runner.cli:main"
+
+[tool.setuptools]
+packages = ["agent", "runner", "dashboard"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

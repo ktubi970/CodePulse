@@ -19,8 +19,8 @@ Stores top-level metadata and authoritative test results for each benchmark run.
 | `instruction` | TEXT | Full instruction prompt |
 | `created_at` | TEXT (ISO-8601) | Run start timestamp |
 | `finished_at` | TEXT (ISO-8601) | Run completion timestamp |
-| `status` | TEXT | Terminal status (`success`, `tests_failed`, etc.) |
-| `success` | INTEGER (0/1) | Objective success flag based on final pytest exit code 0 |
+| `status` | TEXT | Terminal status: `success`, `tests_failed`, `test_timeout`, `weak_tests` (agent tests miss a mutant), `invalid_test_report` (pytest exited 0 without a clean JUnit report), `run_timeout`, `ollama_unavailable` |
+| `success` | INTEGER (0/1) | Final pytest exit code 0, JUnit report with at least one test and no failure, error or skip, and no surviving mutant |
 | `duration_s` | REAL | Total execution duration in seconds |
 | `turns` | INTEGER | Number of turns consumed |
 | `test_runs` | INTEGER | Number of pytest invocations |
@@ -41,7 +41,7 @@ Stores turn-by-turn action requests and observations.
 |---|---|---|
 | `run_id` | TEXT | Foreign key referencing `runs.run_id` |
 | `turn` | INTEGER | Turn index (1-based) |
-| `action_type` | TEXT | Action type (`list_files`, `read_file`, `apply_patch`, `run_tests`, `finish`) |
+| `action_type` | TEXT | Action type (`list_files`, `read_file`, `write_file`, `apply_patch`, `run_tests`, `finish`, `protocol_error`, `executor_error`) |
 | `request_json` | TEXT (JSON) | Request arguments |
 | `result_json` | TEXT (JSON) | Execution outcome observations |
 | `created_at` | TEXT (ISO-8601) | Action timestamp |

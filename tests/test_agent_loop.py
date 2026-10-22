@@ -54,6 +54,35 @@ def test_agent_success_requires_fresh_final_test(tmp_path: Path) -> None:
     assert outcome.test_runs == 1
 
 
+def test_agent_can_solve_task_with_write_file(tmp_path: Path) -> None:
+    task = write_task(tmp_path)
+    (task / "repo" / "value.py").write_text("value = 1\n", encoding="utf-8")
+    tests = task / "repo" / "tests"
+    tests.mkdir(exist_ok=True)
+    (tests / "test_value.py").write_text(
+        "from value import value\n\ndef test_value(): assert value == 2\n",
+        encoding="utf-8",
+    )
+    client = ScriptedClient(
+        [
+            '{"action":"write_file","path":"value.py","content":"value = 2\\n","summary":"fix"}',
+            '{"action":"finish"}',
+        ]
+    )
+
+    outcome = run_agent(
+        client=client,
+        model=OllamaModel("local:test", "abc", "1B", "Q4"),
+        ollama_version="0.test",
+        manifest=load_manifest(task),
+        budget=BudgetConfig(),
+        store=ResultStore(tmp_path / "runs.sqlite3"),
+    )
+
+    assert outcome.success is True
+    assert "+value = 2" in outcome.final_patch
+
+
 def test_immediate_finish_fails_if_tests_fail(tmp_path: Path) -> None:
     task = write_task(tmp_path)
     tests = task / "repo" / "tests"

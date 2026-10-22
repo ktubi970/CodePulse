@@ -20,6 +20,13 @@ class ReadFile:
 
 
 @dataclass(frozen=True, slots=True)
+class WriteFile:
+    path: str
+    content: str
+    action: str = "write_file"
+
+
+@dataclass(frozen=True, slots=True)
 class ApplyPatch:
     patch: str
     action: str = "apply_patch"
@@ -36,7 +43,20 @@ class Finish:
     action: str = "finish"
 
 
-Action: TypeAlias = ListFiles | ReadFile | ApplyPatch | RunTests | Finish
+Action: TypeAlias = ListFiles | ReadFile | WriteFile | ApplyPatch | RunTests | Finish
+
+# Fields each action needs. Other schema fields are tolerated and ignored: the flat schema
+# sent to Ollama lets constrained decoding emit them, so rejecting them punishes the model
+# for output the harness itself allowed.
+_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
+    "list_files": frozenset(),
+    "read_file": frozenset({"path"}),
+    "write_file": frozenset({"path", "content"}),
+    "apply_patch": frozenset({"patch"}),
+    "run_tests": frozenset(),
+    "finish": frozenset(),
+}
+_SCHEMA_FIELDS = frozenset({"action", "path", "patch", "content", "summary"})
 
 
 def _relative_path(value: object) -> str:
@@ -75,42 +95,43 @@ def parse_action(raw: str) -> Action:
     if not isinstance(action_type, str):
         raise ProtocolError("JSON object must contain a string 'action' field")
 
+    if action_type not in _REQUIRED_FIELDS:
+        raise ProtocolError(f"unknown action type: {action_type}")
+
     keys = set(data.keys())
+    unexpected = keys - _SCHEMA_FIELDS
+    if unexpected:
+        raise ProtocolError(f"unexpected fields for {action_type} action: {sorted(unexpected)}")
+    missing = _REQUIRED_FIELDS[action_type] - keys
+    if missing:
+        raise ProtocolError(f"missing fields for {action_type} action: {sorted(missing)}")
 
     if action_type == "list_files":
-        if keys != {"action"}:
-            raise ProtocolError(f"unexpected fields for list_files action: {keys - {'action'}}")
         return ListFiles()
 
     elif action_type == "read_file":
-        if keys != {"action", "path"}:
-            raise ProtocolError(f"unexpected or missing fields for read_file action: {keys}")
-        path = _relative_path(data["path"])
-        return ReadFile(path=path)
+        return ReadFile(path=_relative_path(data["path"]))
+
+    elif action_type == "write_file":
+        content = data["content"]
+        if not isinstance(content, str):
+            raise ProtocolError("write_file requires a string content")
+        return WriteFile(path=_relative_path(data["path"]), content=content)
 
     elif action_type == "apply_patch":
-        if keys != {"action", "patch"}:
-            raise ProtocolError(f"unexpected or missing fields for apply_patch action: {keys}")
         patch = data["patch"]
         if not isinstance(patch, str) or not patch.strip():
             raise ProtocolError("apply_patch requires non-empty string patch")
         return ApplyPatch(patch=patch)
 
     elif action_type == "run_tests":
-        if keys != {"action"}:
-            raise ProtocolError(f"unexpected fields for run_tests action: {keys - {'action'}}")
         return RunTests()
 
-    elif action_type == "finish":
-        if keys != {"action", "summary"}:
-            raise ProtocolError(f"unexpected or missing fields for finish action: {keys}")
-        summary = data["summary"]
+    else:
+        summary = data.get("summary", "")
         if not isinstance(summary, str):
             raise ProtocolError("finish requires a string summary")
         return Finish(summary=summary)
-
-    else:
-        raise ProtocolError(f"unknown action type: {action_type}")
 
 
 def action_json_schema() -> dict[str, object]:
@@ -119,9 +140,10 @@ def action_json_schema() -> dict[str, object]:
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list_files", "read_file", "apply_patch", "run_tests", "finish"],
+                "enum": list(_REQUIRED_FIELDS),
             },
             "path": {"type": "string"},
+            "content": {"type": "string"},
             "patch": {"type": "string"},
             "summary": {"type": "string"},
         },

@@ -5,15 +5,90 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Any, Self
+from typing import Any, Self, Sequence
+import uuid
+from xml.etree import ElementTree
 
 from agent.patches import apply_patch as sys_apply_patch, build_final_diff, snapshot_tree
-from agent.protocol import Action, ApplyPatch, Finish, ListFiles, ReadFile, RunTests
+from agent.protocol import Action, ApplyPatch, Finish, ListFiles, ReadFile, RunTests, WriteFile
 from runner.manifests import TaskManifest
+
+# -I ignores PYTHON* variables, user site-packages and the working directory, so files
+# written by the model (sitecustomize.py, ...) are not importable at interpreter start-up.
+# The repository only joins sys.path later, through pytest's `pythonpath` option.
+# -B keeps __pycache__ out of the workspace.
+_PYTHON_FLAGS = ("-I", "-B")
+# conftest.py hooks written by the model could rewrite test outcomes.
+_PYTEST_FLAGS = ("--noconftest", "-p", "no:cacheprovider", "-o", "pythonpath=repo")
+# Mutants are checked against the repository's own tests, i.e. the tests the agent wrote.
+_MUTATION_ARGV = ("-q", "repo/tests")
 
 
 class ExecutorError(RuntimeError):
     pass
+
+
+def _sanitized_env() -> dict[str, str]:
+    env = {
+        key: os.environ[key]
+        for key in ("PATH", "SYSTEMROOT", "TEMP", "TMP", "PATHEXT", "COMSPEC")
+        if key in os.environ
+    }
+    env.update(
+        {
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "NO_PROXY": "*",
+            "no_proxy": "*",
+        }
+    )
+    return env
+
+
+def check_test_runtime(python: str | None = None, module: str = "pytest") -> str:
+    """Fail loudly when the isolated test command cannot start.
+
+    Isolated mode (-I) disables user site-packages, so a pytest installed with
+    `pip install --user` is invisible to it and every run would silently fail.
+    """
+    argv = [python or sys.executable, *_PYTHON_FLAGS, "-m", module, "--version"]
+    try:
+        proc = subprocess.run(
+            argv, env=_sanitized_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False
+        )
+    except Exception as err:
+        raise ExecutorError(f"Test runtime check failed to launch {argv[0]}: {err}") from err
+
+    output = (proc.stdout + proc.stderr).decode("utf-8", errors="replace").strip()
+    if proc.returncode != 0:
+        raise ExecutorError(
+            f"The test runner cannot import '{module}' with {argv[0]} (user site-packages are disabled): "
+            f"{output}\nInstall the project in a virtual environment: python -m venv .venv, "
+            "then pip install -e .[test] inside it."
+        )
+    return output
+
+
+@dataclass(frozen=True, slots=True)
+class TestReport:
+    tests: int
+    failures: int
+    errors: int
+    skipped: int
+
+
+def _read_junit(path: Path) -> TestReport | None:
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError):
+        return None
+    suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+    if not suites:
+        return None
+    try:
+        totals = [sum(int(s.get(key, "0")) for s in suites) for key in ("tests", "failures", "errors", "skipped")]
+    except ValueError:
+        return None
+    return TestReport(*totals)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +98,18 @@ class TestResult:
     stderr: str
     timed_out: bool = False
     duration_s: float = 0.0
+    report: TestReport | None = None
+
+    @property
+    def passed(self) -> bool:
+        # Exit code 0 alone is not proof: code under test can os._exit(0) or skip tests.
+        return (
+            self.exit_code == 0
+            and not self.timed_out
+            and self.report is not None
+            and self.report.tests > 0
+            and self.report.failures == self.report.errors == self.report.skipped == 0
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +166,12 @@ class WorkspaceExecutor:
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         self.cleanup()
 
+    def overlay(self, source_dir: Path) -> None:
+        """Copy a tree (reference solution, mutant) over the editable repository."""
+        if self.repo_root is None:
+            raise ExecutorError("Executor workspace is not setup")
+        shutil.copytree(source_dir, self.repo_root, dirs_exist_ok=True)
+
     def _resolve_relative_path(self, path_str: str) -> Path:
         if self.repo_root is None:
             raise ExecutorError("Executor workspace is not setup")
@@ -133,6 +226,19 @@ class WorkspaceExecutor:
 
         return ActionResult(kind="read_file", data={"path": path_str, "content": content})
 
+    def write_file(self, path_str: str, content: str) -> ActionResult:
+        target = self._resolve_relative_path(path_str)
+        if target.is_dir():
+            raise ExecutorError(f"Cannot write '{path_str}': it is a directory")
+
+        data = content.encode("utf-8")
+        if len(data) > 65536:  # same ceiling as read_file
+            raise ExecutorError(f"Content for '{path_str}' exceeds maximum write size of 64 KiB ({len(data)} bytes)")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)  # bytes: no platform newline translation
+        return ActionResult(kind="write_file", data={"path": path_str, "bytes_written": len(data), "ok": True})
+
     def apply_patch(self, patch: str) -> ActionResult:
         if self.repo_root is None:
             raise ExecutorError("Executor workspace is not setup")
@@ -164,6 +270,8 @@ class WorkspaceExecutor:
             return self.list_files()
         elif isinstance(action, ReadFile):
             return self.read_file(action.path)
+        elif isinstance(action, WriteFile):
+            return self.write_file(action.path, action.content)
         elif isinstance(action, ApplyPatch):
             return self.apply_patch(action.patch)
         elif isinstance(action, RunTests):
@@ -173,42 +281,33 @@ class WorkspaceExecutor:
         else:
             raise ExecutorError(f"Unsupported action type: {type(action)}")
 
-    def _execute_pytest_vector(self) -> TestResult:
+    def _execute_pytest_vector(self, argv_tail: Sequence[str] | None = None, cwd: Path | None = None) -> TestResult:
         if self.work_dir is None:
             raise ExecutorError("Executor workspace is not setup")
 
-        argv = [sys.executable if arg == "{python}" else arg for arg in self.manifest.test_argv]
-
-        env = {
-            key: os.environ[key]
-            for key in ("PATH", "SYSTEMROOT", "TEMP", "TMP", "PATHEXT", "COMSPEC")
-            if key in os.environ
-        }
-        env.update(
-            {
-                "PYTHONNOUSERSITE": "1",
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-                "NO_PROXY": "*",
-                "no_proxy": "*",
-                "PYTHONPATH": f"{self.repo_root}{os.pathsep}{self.work_dir}",
-            }
-        )
+        # The manifest vector always starts with {python} -m pytest (enforced by the loader).
+        tail = self.manifest.test_argv[3:] if argv_tail is None else argv_tail
+        report_path = self.work_dir / f"junit-{uuid.uuid4().hex}.xml"
+        argv = [
+            sys.executable, *_PYTHON_FLAGS, "-m", "pytest", *_PYTEST_FLAGS, f"--junitxml={report_path}", *tail
+        ]
 
         try:
             proc = subprocess.run(
                 argv,
-                cwd=self.work_dir,
+                cwd=cwd or self.work_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=env,
+                env=_sanitized_env(),
                 timeout=self.test_timeout_s,
                 shell=False,
                 check=False,
             )
             stdout = proc.stdout.decode("utf-8", errors="replace")[:262144]
             stderr = proc.stderr.decode("utf-8", errors="replace")[:262144]
-            return TestResult(exit_code=proc.returncode, stdout=stdout, stderr=stderr, timed_out=False)
+            report = _read_junit(report_path)
+            report_path.unlink(missing_ok=True)
+            return TestResult(exit_code=proc.returncode, stdout=stdout, stderr=stderr, timed_out=False, report=report)
         except subprocess.TimeoutExpired as exc:
             stdout = (exc.stdout or b"").decode("utf-8", errors="replace")[:262144]
             stderr = (exc.stderr or b"").decode("utf-8", errors="replace")[:262144]
@@ -222,6 +321,27 @@ class WorkspaceExecutor:
 
     def final_test(self) -> TestResult:
         return self._execute_pytest_vector()
+
+    def surviving_mutants(self) -> list[str]:
+        """Names of known-buggy variants that the repository's own tests fail to catch.
+
+        A test-writing task is not solved by deleting the failing test: the agent's tests
+        must also fail on each mutant shipped with the task.
+        """
+        if self.manifest.mutants_path is None:
+            return []
+        if self.work_dir is None or self.repo_root is None:
+            raise ExecutorError("Executor workspace is not setup")
+
+        survivors: list[str] = []
+        for mutant in sorted(p for p in self.manifest.mutants_path.iterdir() if p.is_dir()):
+            mutant_root = self.work_dir / "mutants" / mutant.name
+            shutil.rmtree(mutant_root, ignore_errors=True)
+            shutil.copytree(self.repo_root, mutant_root / "repo")
+            shutil.copytree(mutant, mutant_root / "repo", dirs_exist_ok=True)
+            if self._execute_pytest_vector(_MUTATION_ARGV, cwd=mutant_root).exit_code == 0:
+                survivors.append(mutant.name)
+        return survivors
 
     def final_diff(self) -> str:
         if self.repo_root is None:

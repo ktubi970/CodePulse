@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+from agent.executor import check_test_runtime
 from agent.loop import RunOutcome, run_agent
 from agent.ollama import OllamaClient, OllamaModel
 from runner.config import AppConfig, load_config
@@ -10,6 +11,7 @@ from runner.storage import ResultStore
 
 class BenchmarkRunner:
     def __init__(self, config: AppConfig, client: Any | None = None) -> None:
+        check_test_runtime()
         self.config = config
         self.store = ResultStore(config.result_db)
         self.client = client if client is not None else OllamaClient(config.ollama.base_url)

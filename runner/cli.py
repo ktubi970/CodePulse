@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 from typing import Sequence
 
-from agent.executor import WorkspaceExecutor
+from agent.executor import WorkspaceExecutor, check_test_runtime
 from agent.ollama import OllamaClient
 from runner.benchmark import BenchmarkRunner
 from runner.config import load_config
@@ -67,14 +67,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
 
     elif args.command == "validate-tasks":
+        try:
+            print(f"Test runtime: {check_test_runtime()}")
+        except Exception as err:
+            print(f"Test runtime error: {err}", file=sys.stderr)
+            return 1
         tasks_dir = config_path.parent / "tasks"
         discovered = discover_tasks(tasks_dir)
         print(f"Discovered {len(discovered)} tasks in '{tasks_dir}':")
+        problems = 0
         for task_id, manifest in discovered.items():
             with WorkspaceExecutor.create(manifest, test_timeout_s=manifest.test_timeout_s) as executor:
-                res = executor.final_test()
-                status = "FAIL (Expected)" if res.exit_code != 0 else "PASS (UNEXPECTED)"
-                print(f" - {task_id:<30} [{manifest.category:<15}] -> Initial test: {status}")
+                initial_ok = executor.final_test().exit_code != 0
+            if manifest.solution_path is None:
+                solution_ok = False
+            else:
+                with WorkspaceExecutor.create(manifest, test_timeout_s=manifest.test_timeout_s) as executor:
+                    executor.overlay(manifest.solution_path)
+                    solution_ok = executor.final_test().passed and not executor.surviving_mutants()
+            problems += (not initial_ok) + (not solution_ok)
+            initial = "fails (expected)" if initial_ok else "PASSES (UNEXPECTED)"
+            solution = "passes" if solution_ok else "MISSING OR FAILING"
+            print(f" - {task_id:<30} [{manifest.category:<15}] initial: {initial:<19} reference: {solution}")
+        if problems:
+            print(f"{problems} task problem(s) found.", file=sys.stderr)
+            return 1
         return 0
 
     elif args.command == "run":

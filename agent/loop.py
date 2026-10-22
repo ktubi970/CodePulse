@@ -160,18 +160,27 @@ def run_agent(
 
         # Mandatory final verification
         final_test = executor.final_test()
+        surviving_mutants = executor.surviving_mutants() if final_test.passed else []
         final_patch = executor.final_diff()
         test_runs = executor.test_run_count + 1
 
         total_duration = time.monotonic() - start_time
 
-        success = (final_test.exit_code == 0) and not final_test.timed_out
+        success = final_test.passed and not surviving_mutants
         if success:
             status = "success"
         elif terminal_status:
             status = terminal_status
         elif final_test.timed_out:
             status = "test_timeout"
+        elif final_test.exit_code == 0 and not final_test.passed:
+            status = "invalid_test_report"
+            error_type = "InvalidTestReport"
+            error_message = f"pytest exited 0 without a clean JUnit report: {final_test.report}"
+        elif surviving_mutants:
+            status = "weak_tests"
+            error_type = "WeakTests"
+            error_message = f"Agent tests did not detect mutants: {', '.join(surviving_mutants)}"
         else:
             status = "tests_failed"
 

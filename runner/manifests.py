@@ -21,6 +21,8 @@ class TaskManifest:
     verification_path: Path
     test_argv: tuple[str, ...]
     test_timeout_s: float
+    solution_path: Path | None = None
+    mutants_path: Path | None = None
 
     def instruction(self) -> str:
         return self.instruction_path.read_text(encoding="utf-8")
@@ -78,6 +80,11 @@ def load_manifest(task_dir: Path) -> TaskManifest:
     if test_timeout <= 0:
         raise ManifestError(f"test_timeout_s in {t_dir} must be positive")
 
+    # Reference solution: files overlaid on the repo copy; never exposed to the model.
+    solution_path = _optional_task_dir(t_dir, data, "solution")
+    # Mutants: buggy variants the agent's own tests must catch (test-writing tasks).
+    mutants_path = _optional_task_dir(t_dir, data, "mutants")
+
     return TaskManifest(
         task_id=task_id,
         category=category,
@@ -87,7 +94,21 @@ def load_manifest(task_dir: Path) -> TaskManifest:
         verification_path=verif_path,
         test_argv=test_argv,
         test_timeout_s=test_timeout,
+        solution_path=solution_path,
+        mutants_path=mutants_path,
     )
+
+
+def _optional_task_dir(t_dir: Path, data: dict, key: str) -> Path | None:
+    rel = data.get(key)
+    if rel is None:
+        default = t_dir / key
+        return default if default.is_dir() else None
+
+    path = (t_dir / rel).resolve()
+    if not path.is_relative_to(t_dir) or not path.is_dir():
+        raise ManifestError(f"Invalid {key} directory path '{rel}' in {t_dir}")
+    return path
 
 
 def discover_tasks(root: Path) -> dict[str, TaskManifest]:

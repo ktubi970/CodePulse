@@ -9,6 +9,7 @@ from agent.protocol import (
     ProtocolError,
     ReadFile,
     RunTests,
+    WriteFile,
     action_json_schema,
     parse_action,
 )
@@ -30,6 +31,11 @@ def test_parse_patch_preserves_unified_diff() -> None:
     assert action == ApplyPatch(patch=patch)
 
 
+def test_parse_write_file_action() -> None:
+    raw = json.dumps({"action": "write_file", "path": "src/a.py", "content": "x = 2\n"})
+    assert parse_action(raw) == WriteFile(path="src/a.py", content="x = 2\n")
+
+
 def test_parse_run_tests_action() -> None:
     assert parse_action('{"action":"run_tests"}') == RunTests()
 
@@ -45,6 +51,9 @@ def test_parse_finish_action() -> None:
         ('{"action":"shell","command":"dir"}', "unknown action"),
         ('{"action":"read_file","path":"../secret"}', "traverse"),
         ('{"action":"run_tests","extra":1}', "unexpected"),
+        ('{"action":"read_file"}', "missing"),
+        ('{"action":"write_file","path":"src/a.py"}', "missing"),
+        ('{"action":"write_file","path":"../a.py","content":""}', "traverse"),
     ],
 )
 def test_parse_action_fails_closed(raw: str, message: str) -> None:
@@ -52,12 +61,35 @@ def test_parse_action_fails_closed(raw: str, message: str) -> None:
         parse_action(raw)
 
 
-def test_schema_exposes_only_five_actions() -> None:
+def test_schema_exposes_only_six_actions() -> None:
     schema = action_json_schema()
     assert schema["properties"]["action"]["enum"] == [
         "list_files",
         "read_file",
+        "write_file",
         "apply_patch",
         "run_tests",
         "finish",
     ]
+
+
+# Replies seen in real runs: valid under the schema sent to Ollama, yet rejected by the old parser.
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ('{"action":"list_files","path":"."}', ListFiles()),
+        ('{"action":"read_file","path":"src/a.py","summary":"look"}', ReadFile(path="src/a.py")),
+        ('{"action":"apply_patch","patch":"--- a/a.py","summary":"fix"}', ApplyPatch(patch="--- a/a.py")),
+        ('{"action":"finish"}', Finish(summary="")),
+    ],
+)
+def test_parser_ignores_schema_fields_unused_by_the_action(raw: str, expected: object) -> None:
+    assert parse_action(raw) == expected
+
+
+def test_every_schema_property_is_accepted_by_every_action() -> None:
+    schema = action_json_schema()
+    filler = {"path": "src/a.py", "patch": "--- a/a.py", "content": "x = 1\n", "summary": "s"}
+    assert set(schema["properties"]) == {"action", *filler}
+    for action in schema["properties"]["action"]["enum"]:
+        parse_action(json.dumps({"action": action, **filler}))
