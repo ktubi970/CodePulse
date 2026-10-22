@@ -27,7 +27,7 @@ demo_env = os.environ.get("CODEPULSE_DEMO", "").strip() in ("1", "true", "TRUE")
 st.sidebar.header("Data source")
 use_demo = st.sidebar.checkbox("Demo mode (fictional data)", value=demo_env)
 
-default_db_path = Path("results/codepulse.sqlite3")
+default_db_path = Path(os.environ.get("CODEPULSE_DB", "results/codepulse.sqlite3"))
 db_input = st.sidebar.text_input("Local SQLite database", value=str(default_db_path))
 latest_only = st.sidebar.checkbox(
     "Latest run per model and task",

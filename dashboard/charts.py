@@ -1,6 +1,5 @@
 from typing import Any
 
-import plotly.express as px
 import plotly.graph_objects as go
 
 from dashboard.data import HeatmapMatrix
@@ -44,21 +43,26 @@ def scatter_figure(rows: list[dict[str, Any]]) -> go.Figure:
         fig.update_layout(title="No data available for scatter plot")
         return fig
 
-    models = [r["model"] for r in rows]
-    rates = [r["success_rate"] * 100.0 for r in rows]
-    durations = [r["median_duration_s"] for r in rows]
-
-    fig = px.scatter(
-        x=durations,
-        y=rates,
-        text=models,
-        labels={"x": "Median Duration (seconds)", "y": "Success Rate (%)"},
-        title="Success Rate vs Median Execution Time",
+    # One trace per model with a legend: text labels overlap once there are a dozen models.
+    fig = go.Figure(
+        [
+            go.Scatter(
+                x=[r["median_duration_s"]],
+                y=[r["success_rate"] * 100.0],
+                mode="markers",
+                name=r["model"],
+                marker=dict(size=13),
+                hovertemplate=f"{r['model']}<br>%{{y:.0f}}% solved<br>median %{{x:.1f}} s<extra></extra>",
+            )
+            for r in rows
+        ]
     )
-
-    fig.update_traces(marker=dict(size=14, color="#1f77b4"), textposition="top center")
     fig.update_layout(
+        title="Success Rate vs Median Execution Time",
+        xaxis_title="Median Duration (seconds)",
+        yaxis_title="Success Rate (%)",
         yaxis=dict(range=[-5, 105]),
+        legend=dict(title="Model", font=dict(size=11)),
         margin=dict(l=20, r=20, t=40, b=20),
     )
     return fig
