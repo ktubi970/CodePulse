@@ -41,6 +41,14 @@ def test_report_lists_failure_modes(tmp_path: Path) -> None:
     assert "tests_failed" not in report  # superseded by the successful re-run
 
 
+def test_report_excludes_infrastructure_failures_from_scores(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _record(store, "big:3b", "task_c", "ollama_unavailable", 1.0)
+    report = render_markdown(store.finished_runs())
+    assert "| 1 | `big:3b` | 2/2 | 100% |" in report
+    assert "1 run excluded" in report
+
+
 def test_report_handles_empty_database(tmp_path: Path) -> None:
     assert "No finished runs" in render_markdown(ResultStore(tmp_path / "empty.sqlite3").finished_runs())
 

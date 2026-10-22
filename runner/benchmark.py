@@ -2,7 +2,7 @@ from typing import Any
 
 from agent.executor import check_test_runtime
 from agent.loop import RunOutcome, run_agent
-from agent.ollama import OllamaClient
+from agent.ollama import OllamaClient, OllamaUnavailable
 from runner.config import AppConfig
 from runner.manifests import discover_tasks
 from runner.storage import ResultStore
@@ -60,6 +60,10 @@ class BenchmarkRunner:
                     print(f"[{model_tag}] [{task_id}] -> {status_symbol} ({outcome.duration_s:.2f}s)")
                 except KeyboardInterrupt:
                     print("\nBatch execution cancelled by user.")
+                    raise
+                except OllamaUnavailable as err:
+                    # Every remaining run would fail the same way; stop instead of recording noise.
+                    print(f"[{model_tag}] [{task_id}] -> Ollama unavailable, stopping batch: {err}")
                     raise
                 except Exception as err:
                     print(f"[{model_tag}] [{task_id}] -> ERROR: {err}")

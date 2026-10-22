@@ -25,8 +25,14 @@ def _budget_line(runs: list[dict[str, Any]]) -> str:
     return "Budget: " + ", ".join(f"`{key}={value}`" for key, value in sorted(params.items()))
 
 
+# The harness, not the model, failed: these runs say nothing about model quality.
+INFRASTRUCTURE_STATUSES = frozenset({"ollama_unavailable"})
+
+
 def render_markdown(runs: list[dict[str, Any]]) -> str:
-    runs = latest_per_pair(runs)
+    latest = latest_per_pair(runs)
+    runs = [r for r in latest if r["status"] not in INFRASTRUCTURE_STATUSES]
+    excluded = len(latest) - len(runs)
     if not runs:
         return "No finished runs in this database.\n"
 
@@ -53,6 +59,10 @@ def render_markdown(runs: list[dict[str, Any]]) -> str:
         "",
         _budget_line(runs),
         "",
+    ]
+    if excluded:
+        lines += [f"{excluded} run{'s' if excluded > 1 else ''} excluded: Ollama server unavailable.", ""]
+    lines += [
         "| Rank | Model | Solved | Success rate | Median run time |",
         "|---:|---|---:|---:|---:|",
     ]

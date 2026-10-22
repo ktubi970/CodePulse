@@ -2,7 +2,7 @@ from pathlib import Path
 import pytest
 
 from agent.executor import ExecutorError
-from agent.ollama import ModelMissing, OllamaModel, OllamaReply
+from agent.ollama import ModelMissing, OllamaModel, OllamaReply, OllamaUnavailable
 from runner.benchmark import BenchmarkRunner
 from runner.config import load_config
 
@@ -68,6 +68,16 @@ def test_runner_loads_model_before_running(tmp_path: Path) -> None:
     client = FakeOllamaClient(models=["m"])
     BenchmarkRunner(config=load_config(_config(tmp_path)), client=client).run_one("m", "bug_off_by_one")
     assert client.loaded == "m"
+
+
+def test_batch_stops_when_ollama_goes_down(tmp_path: Path) -> None:
+    class DownClient(FakeOllamaClient):
+        def require_model(self, tag: str) -> OllamaModel:
+            raise OllamaUnavailable("connection refused")
+
+    runner = BenchmarkRunner(config=load_config(_config(tmp_path)), client=DownClient(models=["m"]))
+    with pytest.raises(OllamaUnavailable):
+        runner.run_batch()
 
 
 def test_runner_rejects_missing_model_before_creating_run(tmp_path: Path) -> None:
