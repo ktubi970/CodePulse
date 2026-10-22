@@ -41,6 +41,19 @@ def test_store_round_trips_authoritative_final_evidence(tmp_path: Path) -> None:
     assert loaded["actions"][0]["action_type"] == "read_file"
 
 
+def test_store_releases_the_database_file(tmp_path: Path) -> None:
+    # A leaked connection keeps the file locked on Windows (WinError 32).
+    db = tmp_path / "results.sqlite3"
+    store = ResultStore(db)
+    run = RunRecord.new("m", "d", "v", "t", "c", {}, "i")
+    store.start_run(run)
+    store.finish_run(run.run_id, status="tests_failed", success=False, duration_s=0.0, turns=0, test_runs=1)
+    store.get_run(run.run_id)
+    store.list_runs()
+    db.unlink()
+    assert not db.exists()
+
+
 def test_started_run_remains_visible_before_finalization(tmp_path: Path) -> None:
     store = ResultStore(tmp_path / "results.sqlite3")
     run = RunRecord.new(

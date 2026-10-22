@@ -1,3 +1,4 @@
+from contextlib import closing
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -39,18 +40,17 @@ def load_sqlite_runs(db_path: Path) -> list[DashboardRun]:
     if not path.is_file():
         return []
 
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.execute("SELECT * FROM runs WHERE status != 'running' ORDER BY created_at ASC")
-    rows = cursor.fetchall()
+    with closing(sqlite3.connect(path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM runs WHERE status != 'running' ORDER BY created_at ASC").fetchall()
+        actions_by_run: dict[str, list[dict[str, Any]]] = {}
+        for a in conn.execute("SELECT * FROM actions ORDER BY run_id, turn ASC"):
+            actions_by_run.setdefault(a["run_id"], []).append(dict(a))
 
     runs = []
     for r in rows:
         run_id = r["run_id"]
-        actions_rows = conn.execute(
-            "SELECT * FROM actions WHERE run_id = ? ORDER BY turn ASC", (run_id,)
-        ).fetchall()
-        actions = tuple(dict(a) for a in actions_rows)
+        actions = tuple(actions_by_run.get(run_id, []))
 
         runs.append(
             DashboardRun(
@@ -70,7 +70,6 @@ def load_sqlite_runs(db_path: Path) -> list[DashboardRun]:
             )
         )
 
-    conn.close()
     return runs
 
 
@@ -110,6 +109,17 @@ def load_demo_runs(jsonl_path: Path) -> list[DashboardRun]:
         )
 
     return runs
+
+
+def latest_per_pair(runs: list[DashboardRun]) -> list[DashboardRun]:
+    """Keep the newest run of each (model, task) pair; `runs` must be ordered oldest first."""
+    seen: set[tuple[str, str]] = set()
+    latest: list[DashboardRun] = []
+    for r in reversed(runs):
+        if (r.model_tag, r.task_id) not in seen:
+            seen.add((r.model_tag, r.task_id))
+            latest.append(r)
+    return latest[::-1]
 
 
 def ranking_rows(runs: list[DashboardRun]) -> list[dict[str, Any]]:

@@ -177,7 +177,8 @@ class WorkspaceExecutor:
             raise ExecutorError("Executor workspace is not setup")
 
         clean_rel = PurePosixPath(path_str.replace("\\", "/"))
-        if clean_rel.is_absolute() or ".." in clean_rel.parts:
+        # ':' rejects Windows drives and NTFS alternate data streams on every platform.
+        if clean_rel.is_absolute() or ".." in clean_rel.parts or ":" in path_str:
             raise ExecutorError(f"Path '{path_str}' escapes editable repository")
 
         candidate = (self.repo_root / clean_rel).resolve()
@@ -211,9 +212,6 @@ class WorkspaceExecutor:
         target = self._resolve_relative_path(path_str)
         if not target.is_file():
             raise ExecutorError(f"File not found: '{path_str}'")
-
-        if target.is_symlink():
-            raise ExecutorError(f"Symlinks are forbidden: '{path_str}'")
 
         size = target.stat().st_size
         if size > 65536:  # 64 KiB ceiling

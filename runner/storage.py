@@ -1,4 +1,6 @@
-from dataclasses import asdict, dataclass, field
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -92,14 +94,20 @@ class ResultStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        # `with sqlite3.connect(...)` only commits; it never closes the connection.
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON;")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON;")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS runs (
@@ -149,7 +157,7 @@ class ResultStore:
             )
 
     def start_run(self, record: RunRecord) -> None:
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO runs (
@@ -177,7 +185,7 @@ class ResultStore:
             )
 
     def append_action(self, record: ActionRecord) -> None:
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             try:
                 conn.execute(
                     """
@@ -214,7 +222,7 @@ class ResultStore:
         error_message: str | None = None,
     ) -> None:
         finished_at = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 """
                 UPDATE runs SET
@@ -252,7 +260,7 @@ class ResultStore:
                 raise StorageError(f"Failed to finalize run {run_id}: run not found or already finished")
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
             if not row:
                 return None
@@ -264,8 +272,16 @@ class ResultStore:
             run_dict["actions"] = [dict(a) for a in action_rows]
             return run_dict
 
+    def finished_runs(self) -> list[dict[str, Any]]:
+        """Real (non-demo) finished runs, oldest first, without their actions."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM runs WHERE is_demo = 0 AND status != 'running' ORDER BY created_at ASC, rowid ASC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def list_runs(self, limit: int = 100) -> list[dict[str, Any]]:
-        with self._get_connection() as conn:
+        with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()

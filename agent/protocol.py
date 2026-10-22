@@ -64,8 +64,11 @@ def _relative_path(value: object) -> str:
         raise ProtocolError("path must be a non-empty relative path")
     path_str = value.replace("\\", "/").strip()
     path = PurePosixPath(path_str)
-    if path.is_absolute() or ".." in path.parts:
-        raise ProtocolError("path must be relative and cannot traverse parents")
+    # ':' covers Windows drives (C:/x) and NTFS alternate data streams (x.py:stream).
+    if path.is_absolute() or ".." in path.parts or ":" in path_str:
+        raise ProtocolError(
+            "path must be relative to the repository root (e.g. 'src/file.py') and cannot traverse parents"
+        )
     return path.as_posix()
 
 

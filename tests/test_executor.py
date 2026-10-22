@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from agent.executor import ExecutorError, WorkspaceExecutor, check_test_runtime
-from agent.protocol import ReadFile, RunTests, WriteFile
+from agent.protocol import RunTests, WriteFile
 from runner.manifests import load_manifest
 from tests.test_manifests import write_task
 
@@ -40,7 +40,9 @@ def test_write_file_replaces_content_and_shows_in_final_diff(tmp_path: Path) -> 
     assert "+++ b/pkg/new.py" in diff
 
 
-@pytest.mark.parametrize("path", ["../verification/test_hidden.py", "C:/outside.py", "/outside.py"])
+@pytest.mark.parametrize(
+    "path", ["../verification/test_hidden.py", "C:/outside.py", "/outside.py", "src/a.py:stream"]
+)
 def test_write_file_cannot_escape_editable_copy(tmp_path: Path, path: str) -> None:
     task = write_task(tmp_path)
     with WorkspaceExecutor.create(load_manifest(task), test_timeout_s=5) as executor:

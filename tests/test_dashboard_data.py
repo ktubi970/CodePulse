@@ -1,4 +1,4 @@
-from dashboard.data import DashboardRun, heatmap_matrix, ranking_rows, scatter_rows
+from dashboard.data import DashboardRun, heatmap_matrix, latest_per_pair, ranking_rows, scatter_rows
 
 RUNS = [
     DashboardRun("r1", "m1", "t1", True, 2.0, False),
@@ -19,6 +19,13 @@ def test_scatter_uses_median_duration() -> None:
         {"model": "m1", "success_rate": 0.5, "median_duration_s": 4.0},
         {"model": "m2", "success_rate": 1.0, "median_duration_s": 4.0},
     ]
+
+
+def test_latest_per_pair_keeps_only_the_newest_run() -> None:
+    # Runs are loaded oldest first; a re-run must replace, not dilute, the earlier result.
+    rerun = DashboardRun("r4", "m1", "t2", True, 3.0, False)
+    latest = latest_per_pair([*RUNS, rerun])
+    assert [r.run_id for r in latest] == ["r1", "r3", "r4"]
 
 
 def test_heatmap_preserves_missing_cells() -> None:

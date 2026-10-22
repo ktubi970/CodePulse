@@ -50,7 +50,8 @@ INITIAL REPOSITORY FILES:
 """
 
 
-def bounded_observation(obs_str: str, max_bytes: int = 98304) -> str:
+def bounded_observation(obs_str: str, max_bytes: int = 16384) -> str:
+    # 16 KiB is roughly 4k tokens: half of the default 8192-token context.
     obs_bytes = obs_str.encode("utf-8")
     if len(obs_bytes) <= max_bytes:
         return obs_str

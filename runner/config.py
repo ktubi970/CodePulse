@@ -34,6 +34,7 @@ class AppConfig:
     tasks: tuple[str, ...]
     result_db: Path
     budget: BudgetConfig
+    tasks_dir: Path
 
 
 def require_loopback_http(url: str) -> None:
@@ -78,6 +79,7 @@ def load_config(path: Path) -> AppConfig:
 
     rel_db = bench_sec.get("result_db", "results/codepulse.sqlite3")
     result_db = (config_path.parent / rel_db).resolve()
+    tasks_dir = (config_path.parent / bench_sec.get("tasks_dir", "tasks")).resolve()
 
     # Budget values
     temp = float(bench_sec.get("temperature", 0.0))
@@ -111,4 +113,5 @@ def load_config(path: Path) -> AppConfig:
         tasks=tasks,
         result_db=result_db,
         budget=budget,
+        tasks_dir=tasks_dir,
     )

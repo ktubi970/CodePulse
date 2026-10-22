@@ -6,6 +6,8 @@ from agent.ollama import ModelMissing, OllamaModel, OllamaReply
 from runner.benchmark import BenchmarkRunner
 from runner.config import load_config
 
+TASKS_DIR = (Path(__file__).resolve().parents[1] / "tasks").as_posix()
+
 
 class FakeOllamaClient:
     def __init__(self, models: list[str] | None = None) -> None:
@@ -21,6 +23,9 @@ class FakeOllamaClient:
         if tag in self.models_list:
             return OllamaModel(tag, "digest", "1B", "Q4")
         raise ModelMissing(f"Tag {tag} missing")
+
+    def load_model(self, tag: str) -> None:
+        self.loaded = tag
 
     def chat(self, **kwargs: object) -> OllamaReply:
         return OllamaReply(
@@ -44,12 +49,29 @@ def test_runner_refuses_to_start_without_test_runtime(
         BenchmarkRunner(config=load_config(cfg_file), client=FakeOllamaClient())
 
 
-def test_runner_rejects_missing_model_before_creating_run(tmp_path: Path) -> None:
+def _config(tmp_path: Path, extra: str = "") -> Path:
     cfg_file = tmp_path / "codepulse.toml"
     cfg_file.write_text(
-        '[ollama]\nbase_url="http://127.0.0.1:11434"\n[benchmark]\nmodels=["m"]\ntasks=["bug_off_by_one"]\nresult_db="db.sqlite3"\n',
+        '[ollama]\nbase_url="http://127.0.0.1:11434"\n[benchmark]\nmodels=["m"]\ntasks=["bug_off_by_one"]\n'
+        f'result_db="db.sqlite3"\ntasks_dir="{TASKS_DIR}"\n{extra}',
         encoding="utf-8",
     )
+    return cfg_file
+
+
+def test_runner_applies_configured_response_timeout(tmp_path: Path) -> None:
+    runner = BenchmarkRunner(config=load_config(_config(tmp_path, "response_timeout_s = 7.5\n")))
+    assert runner.client.timeout_seconds == 7.5
+
+
+def test_runner_loads_model_before_running(tmp_path: Path) -> None:
+    client = FakeOllamaClient(models=["m"])
+    BenchmarkRunner(config=load_config(_config(tmp_path)), client=client).run_one("m", "bug_off_by_one")
+    assert client.loaded == "m"
+
+
+def test_runner_rejects_missing_model_before_creating_run(tmp_path: Path) -> None:
+    cfg_file = _config(tmp_path)
     config = load_config(cfg_file)
     fake_client = FakeOllamaClient(models=[])
     runner = BenchmarkRunner(config=config, client=fake_client)
