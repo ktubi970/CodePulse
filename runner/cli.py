@@ -8,6 +8,7 @@ from agent.ollama import OllamaClient
 from runner.benchmark import BenchmarkRunner
 from runner.config import load_config
 from runner.manifests import discover_tasks
+from runner.report import render_markdown
 from runner.storage import ResultStore
 
 
@@ -43,6 +44,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     show_parser = subparsers.add_parser("show-runs", help="Show past run records from SQLite storage.")
     show_parser.add_argument("--limit", type=int, default=20, help="Maximum number of runs to display.")
 
+    # report
+    report_parser = subparsers.add_parser("report", help="Write a Markdown leaderboard of the latest runs.")
+    report_parser.add_argument("--db", type=Path, help="SQLite results database (default: result_db from config).")
+    report_parser.add_argument("--output", type=Path, help="Write to this file instead of standard output.")
+
     args = parser.parse_args(argv)
     config_path = args.config.resolve()
 
@@ -54,7 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "list-models":
         try:
-            client = OllamaClient(config.ollama.base_url)
+            client = OllamaClient(config.ollama.base_url, timeout_seconds=config.budget.response_timeout_s)
             models = client.list_models()
             print(f"Ollama Version: {client.version()}")
             print(f"{'TAG':<25} {'DIGEST':<15} {'SIZE':<10} {'QUANT':<10}")
@@ -72,9 +78,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as err:
             print(f"Test runtime error: {err}", file=sys.stderr)
             return 1
-        tasks_dir = config_path.parent / "tasks"
-        discovered = discover_tasks(tasks_dir)
-        print(f"Discovered {len(discovered)} tasks in '{tasks_dir}':")
+        discovered = discover_tasks(config.tasks_dir)
+        print(f"Discovered {len(discovered)} tasks in '{config.tasks_dir}':")
         problems = 0
         for task_id, manifest in discovered.items():
             with WorkspaceExecutor.create(manifest, test_timeout_s=manifest.test_timeout_s) as executor:
@@ -118,6 +123,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as err:
             print(f"Batch error: {err}", file=sys.stderr)
             return 1
+
+    elif args.command == "report":
+        db_path = args.db or config.result_db
+        if not db_path.is_file():
+            print(f"No results database at {db_path}", file=sys.stderr)
+            return 1
+        report = render_markdown(ResultStore(db_path).finished_runs())
+        if args.output:
+            args.output.write_text(report, encoding="utf-8")
+            print(f"Report written to {args.output}")
+        else:
+            sys.stdout.reconfigure(encoding="utf-8")  # the matrix uses emoji
+            print(report, end="")
+        return 0
 
     elif args.command == "show-runs":
         try:
