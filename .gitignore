@@ -31,3 +31,8 @@ tmp/
 Thumbs.db
 .vscode/
 .idea/
+
+# Packaging
+build/
+dist/
+*.egg-info/

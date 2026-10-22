@@ -28,6 +28,16 @@ def test_corpus_has_exact_expected_ids() -> None:
     assert set(TASKS.keys()) == EXPECTED_IDS
 
 
+def test_task_files_use_lf_line_endings() -> None:
+    # File sizes are part of the prompt: CRLF checkouts would change it per platform.
+    crlf = [
+        p.as_posix()
+        for p in Path("tasks").rglob("*")
+        if p.suffix in {".py", ".md", ".json"} and b"\r\n" in p.read_bytes()
+    ]
+    assert crlf == []
+
+
 @pytest.mark.parametrize("task_id", sorted(EXPECTED_IDS))
 def test_instruction_paths_match_the_agent_workspace(task_id: str) -> None:
     # The agent sees the repository root, so `repo/src/x.py` in an instruction is a dead path.

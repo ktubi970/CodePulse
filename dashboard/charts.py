@@ -21,7 +21,7 @@ def ranking_figure(rows: list[dict[str, Any]]) -> go.Figure:
             x=rates,
             y=models,
             orientation="h",
-            text=[f"{r:.1f}% ({c} runs)" for r, c in zip(rates, counts)],
+            text=[f"{r:.1f}% ({c} runs)" for r, c in zip(rates, counts, strict=True)],
             textposition="auto",
             marker_color="#2b5c8f",
         )
