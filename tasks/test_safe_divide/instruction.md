@@ -1,1 +1,1 @@
-Remplacer le test en échec dans `tests/test_math.py` pour vérifier que `safe_divide(a, b)` retourne `None` si `b == 0`.
+Replace the failing test in `tests/test_math.py` with a test checking that `safe_divide(a, b)` returns `None` when `b == 0`.

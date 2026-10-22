@@ -1,1 +1,1 @@
-Implémenter `parse_config(dict_data: dict) -> dict` dans `src/config_parser.py`. Exiger `version == 2` (entier), champ `name` non vide, et rejeter toute clé supérieure inconnue avec ValueError.
+Implement `parse_config(data: dict) -> dict` in `src/config_parser.py`: require `version == 2` (an integer) and a non-empty `name`, and raise ValueError for any unknown top-level key. Return the config unchanged when it is valid.

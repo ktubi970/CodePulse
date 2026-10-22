@@ -1,1 +1,1 @@
-Implémenter `clean_contacts(csv_text: str) -> str` dans `src/clean.py` : nettoyer, minusculiser et dédoublonner les emails, supprimer les lignes sans email valide, retourner un CSV valide 'name,email'.
+Implement `clean_contacts(csv_text: str) -> str` in `src/clean.py`: trim, lowercase and deduplicate emails (keep the first occurrence), drop rows without a valid email, and return valid CSV with a 'name,email' header.

@@ -1,1 +1,1 @@
-Corriger la génération de clé dans `src/cache.py`. Les n-uplets d'arguments doivent utiliser un séparateur ou un tuple d'objets pour éviter les collisions entre ('ab', 'c') et ('a', 'bc').
+Fix the key generation in `src/cache.py`. Combine the arguments with a separator or a tuple so that ('ab', 'c') and ('a', 'bc') no longer produce the same key.

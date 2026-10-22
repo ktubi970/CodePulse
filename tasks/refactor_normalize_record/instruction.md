@@ -1,1 +1,1 @@
-Séparer `normalize_record(data)` dans `src/normalize.py` en fonctions helper `normalize_email(email)` et `normalize_tags(tags)`. Préserver tous les comportements.
+Split `normalize_record(data)` in `src/normalize.py` into helper functions `normalize_email(email)` and `normalize_tags(tags)`. Preserve all existing behavior.

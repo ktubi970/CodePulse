@@ -1,1 +1,1 @@
-Implémenter `slugify(text: str) -> str` dans `src/slug.py`. Convertir en minuscules, remplacer les caractères non-alphanumériques par des tirets uniques et supprimer les tirets en bordure.
+Implement `slugify(text: str) -> str` in `src/slug.py`: lowercase the text, replace each run of non-alphanumeric characters with a single hyphen, and strip leading and trailing hyphens.

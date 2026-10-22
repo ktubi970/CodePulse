@@ -1,3 +1,3 @@
 def parse_event(data: dict) -> dict:
-    # Non implémenté
+    # Not implemented
     return data

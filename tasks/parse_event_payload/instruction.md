@@ -1,1 +1,1 @@
-Implémenter `parse_event(payload: dict) -> dict` dans `src/event_parser.py`. Exiger exactement les clés 'type', 'timestamp', et 'payload'. Type doit être dans ('click', 'view').
+Implement `parse_event(data: dict) -> dict` in `src/event_parser.py`: require exactly the keys 'type', 'timestamp' and 'payload', with a type of 'click' or 'view'; raise ValueError otherwise. Return the event unchanged when it is valid.

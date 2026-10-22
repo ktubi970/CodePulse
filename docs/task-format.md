@@ -7,7 +7,7 @@ Every benchmark task is stored as a self-contained directory under `tasks/<task-
 ```text
 tasks/<task-id>/
 ├── manifest.json         # Task metadata, timeout, and fixed test command vector
-├── instruction.md        # Prompt instruction provided to the agent model (French)
+├── instruction.md        # Instruction given to the agent model (English)
 ├── repo/                 # Initial failing repository state (visible and editable by model)
 ├── verification/         # Hidden pytest checks, copied outside the model's editable root
 ├── solution/             # Reference solution overlaid on repo/ (never shown to the model)
