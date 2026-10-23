@@ -190,7 +190,7 @@ Contributor and agent conventions, including known design debt, are in [AGENTS.m
 
 ```bash
 pip install -e ".[dev]"
-pytest                     # 145 tests, about 2 minutes
+pytest                     # 151 tests, about 2 minutes
 ruff check .
 ```
 

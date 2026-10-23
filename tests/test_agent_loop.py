@@ -25,7 +25,7 @@ class ScriptedClient:
 
 def test_agent_success_requires_fresh_final_test(tmp_path: Path) -> None:
     task = write_task(tmp_path)
-    (task / "repo" / "value.py").write_text("value = 1\n", encoding="utf-8")
+    (task / "repo" / "value.py").write_bytes(b"value = 1\n")  # LF like the corpus: the patch is byte-exact
     tests = task / "repo" / "tests"
     tests.mkdir(exist_ok=True)
     (tests / "test_value.py").write_text(

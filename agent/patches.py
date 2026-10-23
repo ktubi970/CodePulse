@@ -67,7 +67,8 @@ def validate_patch(patch: str, max_bytes: int = 262144) -> None:
 def _git_apply(root: Path, patch: str, *options: str) -> str:
     try:
         proc = subprocess.run(
-            ["git", "apply", *options, "--whitespace=nowarn", "-"],
+            # Git for Windows ships core.autocrlf=true: without this, applied lines would gain \r.
+            ["git", "-c", "core.autocrlf=false", "apply", *options, "--whitespace=nowarn", "-"],
             cwd=root.resolve(),
             input=patch.encode("utf-8"),
             stdout=subprocess.PIPE,
@@ -111,7 +112,16 @@ def apply_patch(root: Path, patch: str, check_path: Callable[[str], object]) -> 
     return changed_paths
 
 
+def _diff_lines(data: bytes | None) -> list[str]:
+    # Split on "\n" only, as git does: str.splitlines() also breaks lines on \r, \f and  .
+    if data is None:
+        return []
+    lines = data.decode("utf-8", errors="replace").split("\n")
+    return [line + "\n" for line in lines[:-1]] + ([lines[-1]] if lines[-1] else [])
+
+
 def build_final_diff(before: Mapping[str, bytes], after: Mapping[str, bytes]) -> str:
+    """A unified diff from `before` to `after` that `git apply` replays byte for byte."""
     all_keys = sorted(set(before.keys()) | set(after.keys()))
     diff_parts = []
 
@@ -122,30 +132,20 @@ def build_final_diff(before: Mapping[str, bytes], after: Mapping[str, bytes]) ->
         if before_bytes == after_bytes:
             continue
 
-        before_lines = (
-            before_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
-            if before_bytes is not None
-            else []
-        )
-        after_lines = (
-            after_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
-            if after_bytes is not None
-            else []
-        )
-
         from_file = f"a/{path}" if before_bytes is not None else "/dev/null"
         to_file = f"b/{path}" if after_bytes is not None else "/dev/null"
 
-        diff = list(
-            difflib.unified_diff(
-                before_lines,
-                after_lines,
-                fromfile=from_file,
-                tofile=to_file,
-                lineterm="\n",
-            )
-        )
-        if diff:
-            diff_parts.extend(diff)
+        for line in difflib.unified_diff(
+            _diff_lines(before_bytes),
+            _diff_lines(after_bytes),
+            fromfile=from_file,
+            tofile=to_file,
+            lineterm="\n",
+        ):
+            if line.endswith("\n"):
+                diff_parts.append(line)
+            else:
+                # Last line of a file without a final newline: git needs the marker to rebuild it.
+                diff_parts.append(line + "\n\\ No newline at end of file\n")
 
     return "".join(diff_parts)

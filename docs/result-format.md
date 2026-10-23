@@ -24,7 +24,7 @@ Stores top-level metadata and authoritative test results for each benchmark run.
 | `duration_s` | REAL | Total execution duration in seconds |
 | `turns` | INTEGER | Number of turns consumed |
 | `test_runs` | INTEGER | Number of pytest invocations |
-| `final_patch` | TEXT | Unified diff patch of modifications |
+| `final_patch` | TEXT | Unified diff of the agent's changes; `git apply` rebuilds the exact bytes, including files without a final newline. Runs recorded before October 23, 2026 may lack the `\ No newline at end of file` marker and then do not replay. |
 | `final_test_exit_code` | INTEGER | Fresh final pytest process exit code |
 | `final_test_stdout` | TEXT | Pytest stdout output |
 | `final_test_stderr` | TEXT | Pytest stderr output |
