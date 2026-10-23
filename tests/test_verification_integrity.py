@@ -83,8 +83,9 @@ def test_reference_tests_kill_every_mutant(task_id: str) -> None:
     assert manifest.mutants_path is not None
     with WorkspaceExecutor.create(manifest) as executor:
         executor.overlay(manifest.solution_path)
-        assert executor.final_test().passed
-        assert executor.surviving_mutants() == []
+        verification = executor.verify()
+    assert verification.test.passed
+    assert verification.surviving_mutants == ()
 
 
 @pytest.mark.parametrize("task_id", sorted(LAZY_TESTS))
@@ -102,3 +103,49 @@ def test_empty_test_is_rejected_as_weak(task_id: str, tmp_path: Path) -> None:
     assert outcome.final_test.passed is True  # the lazy test passes on its own...
     assert outcome.success is False  # ...but catches no bug
     assert outcome.status == "weak_tests"
+
+
+def _run_test_writer(tmp_path: Path, content: str, task_id: str = "test_parse_bool"):
+    path = LAZY_TESTS[task_id][0]
+    reply = json.dumps({"action": "write_file", "path": path, "content": content})
+    return run_agent(
+        client=ScriptedClient([reply, '{"action":"finish"}']),
+        model=OllamaModel("local:test", "abc", "1B", "Q4"),
+        ollama_version="0.test",
+        manifest=TASKS[task_id],
+        budget=BudgetConfig(),
+        store=ResultStore(tmp_path / "runs.sqlite3"),
+    )
+
+
+# Tests that never call the code under test. Each passes on the real run and fails on a mutant
+# only because it notices that it runs against a mutant, or catches nothing at all.
+MUTANT_DETECTORS = {
+    "workspace path": "from pathlib import Path\n\ndef test_it():\n    assert 'mutants' not in Path(__file__).parts\n",
+    "command line": "import sys\n\ndef test_it():\n    assert 'verification' in sys.argv\n",
+    "state left in the repository": (
+        "from pathlib import Path\n\ndef test_it():\n"
+        "    marker = Path(__file__).with_name('seen')\n    assert not marker.exists()\n    marker.write_text('')\n"
+    ),
+    "state left outside the repository": (
+        "from pathlib import Path\n\ndef test_it():\n"
+        "    marker = Path.cwd() / 'seen'\n    assert not marker.exists()\n    marker.write_text('')\n"
+    ),
+    "no test at all": "",
+}
+
+
+@pytest.mark.parametrize("detector", sorted(MUTANT_DETECTORS))
+def test_tests_cannot_tell_a_mutant_run_from_the_real_one(tmp_path: Path, detector: str) -> None:
+    outcome = _run_test_writer(tmp_path, MUTANT_DETECTORS[detector])
+    assert outcome.success is False
+    assert outcome.status in {"weak_tests", "tests_failed"}
+
+
+def test_honest_agent_tests_still_kill_the_mutants(tmp_path: Path) -> None:
+    solution = TASKS["test_parse_bool"].solution_path
+    assert solution is not None
+    content = (solution / LAZY_TESTS["test_parse_bool"][0]).read_text(encoding="utf-8")
+    outcome = _run_test_writer(tmp_path, content)
+    assert outcome.status == "success"
+    assert "seen" not in outcome.final_patch  # verification leaves no test artefact in the diff

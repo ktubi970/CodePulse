@@ -63,7 +63,9 @@ def test_reference_solution_passes_verification(task_id: str) -> None:
     assert manifest.solution_path is not None, f"Task '{task_id}' has no reference solution"
     with WorkspaceExecutor.create(manifest, test_timeout_s=manifest.test_timeout_s) as executor:
         executor.overlay(manifest.solution_path)
-        result = executor.final_test()
-        survivors = executor.surviving_mutants()
+        verification = executor.verify()
+    result = verification.test
     assert result.passed, f"Reference solution for '{task_id}' fails:\n{result.stdout}{result.stderr}"
-    assert survivors == [], f"Reference tests for '{task_id}' miss mutants: {survivors}"
+    assert verification.surviving_mutants == (), (
+        f"Reference tests for '{task_id}' miss mutants: {verification.surviving_mutants}"
+    )

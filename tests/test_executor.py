@@ -61,3 +61,20 @@ def test_test_action_uses_manifest_vector_not_model_text(tmp_path: Path) -> None
         result = executor.execute(RunTests())
     assert result.kind == "test_result"
     assert result.data["exit_code"] == 0
+
+
+@pytest.mark.parametrize("target", ["src/x.py:stream", "C:/outside.py", "../verification/test_hidden.py"])
+def test_apply_patch_uses_the_same_path_check_as_write_file(tmp_path: Path, target: str) -> None:
+    patch = f"--- /dev/null\n+++ b/{target}\n@@ -0,0 +1 @@\n+pwned = True\n"
+    with WorkspaceExecutor.create(load_manifest(write_task(tmp_path)), test_timeout_s=5) as executor:
+        with pytest.raises(ExecutorError, match="escapes"):
+            executor.apply_patch(patch)
+
+
+def test_apply_patch_refuses_renames_whose_source_git_does_not_report(tmp_path: Path) -> None:
+    task = write_task(tmp_path)
+    (task / "repo" / "a.py").write_text("a = 1\n", encoding="utf-8")
+    patch = "diff --git a/a.py b/b.py\nsimilarity index 100%\nrename from a.py\nrename to b.py\n"
+    with WorkspaceExecutor.create(load_manifest(task), test_timeout_s=5) as executor:
+        with pytest.raises(ExecutorError, match="rename"):
+            executor.apply_patch(patch)

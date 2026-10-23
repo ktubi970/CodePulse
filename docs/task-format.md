@@ -20,9 +20,12 @@ tasks/<task-id>/
   initial state fails and that the reference solution passes, so a broken verification file
   is caught instead of silently lowering every model's score.
 - Test-writing tasks ship `mutants/`. After the final run passes, each mutant is overlaid on a
-  copy of the agent's repository and `repo/tests` is run again: if any mutant still passes, the
-  run fails with status `weak_tests`. This stops an agent from "fixing" a failing test by
-  deleting its assertions.
+  fresh copy of the agent's repository, at the same path, and the same test command runs again.
+  A mutant is caught only if one of the agent's tests (under `repo/`) fails; the hidden tests fail
+  on every mutant and do not count. If any mutant is not caught, the run fails with status
+  `weak_tests`. The real run is then repeated, so a test that behaves differently on later runs
+  fails it. This stops an agent from "fixing" a failing test by deleting its assertions, or by
+  writing a test that only detects the mutant workspace.
 
 ## `manifest.json` Schema
 

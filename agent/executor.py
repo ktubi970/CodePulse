@@ -1,16 +1,27 @@
 from dataclasses import dataclass, field
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
-from typing import Any, Self, Sequence
+from typing import Any, Self
 import uuid
 from xml.etree import ElementTree
 
 from agent.patches import apply_patch as sys_apply_patch, build_final_diff, snapshot_tree
-from agent.protocol import Action, ApplyPatch, Finish, ListFiles, ReadFile, RunTests, WriteFile
+from agent.protocol import (
+    Action,
+    ApplyPatch,
+    Finish,
+    ListFiles,
+    ProtocolError,
+    ReadFile,
+    RunTests,
+    WriteFile,
+    relative_path,
+)
 from runner.manifests import TaskManifest
 
 # -I ignores PYTHON* variables, user site-packages and the working directory, so files
@@ -20,8 +31,6 @@ from runner.manifests import TaskManifest
 _PYTHON_FLAGS = ("-I", "-B")
 # conftest.py hooks written by the model could rewrite test outcomes.
 _PYTEST_FLAGS = ("--noconftest", "-p", "no:cacheprovider", "-o", "pythonpath=repo")
-# Mutants are checked against the repository's own tests, i.e. the tests the agent wrote.
-_MUTATION_ARGV = ("-q", "repo/tests")
 
 
 class ExecutorError(RuntimeError):
@@ -74,6 +83,8 @@ class TestReport:
     failures: int
     errors: int
     skipped: int
+    # Dotted module of each failed or erroring test case, e.g. "repo.tests.test_parse".
+    failed_modules: tuple[str, ...] = ()
 
 
 def _read_junit(path: Path) -> TestReport | None:
@@ -88,7 +99,22 @@ def _read_junit(path: Path) -> TestReport | None:
         totals = [sum(int(s.get(key, "0")) for s in suites) for key in ("tests", "failures", "errors", "skipped")]
     except ValueError:
         return None
-    return TestReport(*totals)
+    failed = tuple(
+        # A collection error has an empty classname and the module as its name.
+        case.get("classname") or case.get("name", "")
+        for suite in suites
+        for case in suite.iter("testcase")
+        if case.find("failure") is not None or case.find("error") is not None
+    )
+    return TestReport(*totals, failed_modules=failed)
+
+
+def _remove_tree(path: Path) -> None:
+    def make_writable(func: Any, target: str, _exc: BaseException) -> None:
+        os.chmod(target, stat.S_IWRITE)  # tests may leave read-only files behind
+        func(target)
+
+    shutil.rmtree(path, onexc=make_writable)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +136,16 @@ class TestResult:
             and self.report.tests > 0
             and self.report.failures == self.report.errors == self.report.skipped == 0
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Verification:
+    test: TestResult
+    surviving_mutants: tuple[str, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return self.test.passed and not self.surviving_mutants
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,10 +212,10 @@ class WorkspaceExecutor:
         if self.repo_root is None:
             raise ExecutorError("Executor workspace is not setup")
 
-        clean_rel = PurePosixPath(path_str.replace("\\", "/"))
-        # ':' rejects Windows drives and NTFS alternate data streams on every platform.
-        if clean_rel.is_absolute() or ".." in clean_rel.parts or ":" in path_str:
-            raise ExecutorError(f"Path '{path_str}' escapes editable repository")
+        try:
+            clean_rel = relative_path(path_str)
+        except ProtocolError as err:
+            raise ExecutorError(f"Path '{path_str}' escapes editable repository: {err}") from err
 
         candidate = (self.repo_root / clean_rel).resolve()
         if not candidate.is_relative_to(self.repo_root.resolve()):
@@ -242,7 +278,7 @@ class WorkspaceExecutor:
             raise ExecutorError("Executor workspace is not setup")
 
         try:
-            changed = sys_apply_patch(self.repo_root, patch)
+            changed = sys_apply_patch(self.repo_root, patch, check_path=self._resolve_relative_path)
             return ActionResult(kind="apply_patch", data={"changed_files": list(changed), "ok": True})
         except Exception as err:
             raise ExecutorError(f"Failed to apply patch: {err}") from err
@@ -279,21 +315,26 @@ class WorkspaceExecutor:
         else:
             raise ExecutorError(f"Unsupported action type: {type(action)}")
 
-    def _execute_pytest_vector(self, argv_tail: Sequence[str] | None = None, cwd: Path | None = None) -> TestResult:
+    def _execute_pytest_vector(self) -> TestResult:
         if self.work_dir is None:
             raise ExecutorError("Executor workspace is not setup")
 
         # The manifest vector always starts with {python} -m pytest (enforced by the loader).
-        tail = self.manifest.test_argv[3:] if argv_tail is None else argv_tail
         report_path = self.work_dir / f"junit-{uuid.uuid4().hex}.xml"
         argv = [
-            sys.executable, *_PYTHON_FLAGS, "-m", "pytest", *_PYTEST_FLAGS, f"--junitxml={report_path}", *tail
+            sys.executable,
+            *_PYTHON_FLAGS,
+            "-m",
+            "pytest",
+            *_PYTEST_FLAGS,
+            f"--junitxml={report_path}",
+            *self.manifest.test_argv[3:],
         ]
 
         try:
             proc = subprocess.run(
                 argv,
-                cwd=cwd or self.work_dir,
+                cwd=self.work_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=_sanitized_env(),
@@ -320,26 +361,48 @@ class WorkspaceExecutor:
     def final_test(self) -> TestResult:
         return self._execute_pytest_vector()
 
-    def surviving_mutants(self) -> list[str]:
-        """Names of known-buggy variants that the repository's own tests fail to catch.
+    def verify(self) -> Verification:
+        """The verdict: the manifest's test vector, then every mutant, then the vector again.
 
-        A test-writing task is not solved by deleting the failing test: the agent's tests
-        must also fail on each mutant shipped with the task.
+        A test-writing task is not solved by deleting the failing test: the agent's tests must also
+        fail on each known-buggy mutant shipped with the task. Every run starts from a fresh copy of
+        the agent's repository, at the same path and with the same command, so a test cannot tell a
+        mutant from the real code by where or how it runs. The closing run catches tests that tell
+        runs apart by state they leave outside the repository.
         """
-        if self.manifest.mutants_path is None:
-            return []
         if self.work_dir is None or self.repo_root is None:
             raise ExecutorError("Executor workspace is not setup")
 
-        survivors: list[str] = []
-        for mutant in sorted(p for p in self.manifest.mutants_path.iterdir() if p.is_dir()):
-            mutant_root = self.work_dir / "mutants" / mutant.name
-            shutil.rmtree(mutant_root, ignore_errors=True)
-            shutil.copytree(self.repo_root, mutant_root / "repo")
-            shutil.copytree(mutant, mutant_root / "repo", dirs_exist_ok=True)
-            if self._execute_pytest_vector(_MUTATION_ARGV, cwd=mutant_root).exit_code == 0:
-                survivors.append(mutant.name)
-        return survivors
+        agent_repo = self.work_dir / "agent_repo"
+        shutil.copytree(self.repo_root, agent_repo)
+        try:
+            result = self.final_test()
+            mutants = [] if self.manifest.mutants_path is None else sorted(
+                p for p in self.manifest.mutants_path.iterdir() if p.is_dir()
+            )
+            if not result.passed or not mutants:
+                return Verification(result)
+
+            survivors = tuple(m.name for m in mutants if not self._agent_tests_catch(agent_repo, m))
+            self._restore_repo(agent_repo)
+            return Verification(self.final_test(), survivors)
+        finally:
+            self._restore_repo(agent_repo)  # final_diff shows the agent's edits, not test artefacts
+            _remove_tree(agent_repo)
+
+    def _restore_repo(self, source: Path) -> None:
+        if self.repo_root is None:
+            raise ExecutorError("Executor workspace is not setup")
+        _remove_tree(self.repo_root)
+        shutil.copytree(source, self.repo_root)
+
+    def _agent_tests_catch(self, agent_repo: Path, mutant: Path) -> bool:
+        self._restore_repo(agent_repo)
+        self.overlay(mutant)
+        report = self.final_test().report
+        # Hidden tests fail on every mutant; only a failing test from the agent's repository counts.
+        # Without a report (crash, timeout) nothing shows that the agent's tests caught the mutant.
+        return report is not None and any(m.split(".")[0] == "repo" for m in report.failed_modules)
 
     def final_diff(self) -> str:
         if self.repo_root is None:
