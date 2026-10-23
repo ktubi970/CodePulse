@@ -59,7 +59,8 @@ _REQUIRED_FIELDS: dict[str, frozenset[str]] = {
 _SCHEMA_FIELDS = frozenset({"action", "path", "patch", "content", "summary"})
 
 
-def _relative_path(value: object) -> str:
+def relative_path(value: object) -> str:
+    """The one rule for every path the model supplies, whether in an action field or inside a patch."""
     if not isinstance(value, str) or not value.strip():
         raise ProtocolError("path must be a non-empty relative path")
     path_str = value.replace("\\", "/").strip()
@@ -113,13 +114,13 @@ def parse_action(raw: str) -> Action:
         return ListFiles()
 
     elif action_type == "read_file":
-        return ReadFile(path=_relative_path(data["path"]))
+        return ReadFile(path=relative_path(data["path"]))
 
     elif action_type == "write_file":
         content = data["content"]
         if not isinstance(content, str):
             raise ProtocolError("write_file requires a string content")
-        return WriteFile(path=_relative_path(data["path"]), content=content)
+        return WriteFile(path=relative_path(data["path"]), content=content)
 
     elif action_type == "apply_patch":
         patch = data["patch"]

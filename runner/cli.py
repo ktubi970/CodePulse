@@ -89,7 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 with WorkspaceExecutor.create(manifest, test_timeout_s=manifest.test_timeout_s) as executor:
                     executor.overlay(manifest.solution_path)
-                    solution_ok = executor.final_test().passed and not executor.surviving_mutants()
+                    solution_ok = executor.verify().passed
             problems += (not initial_ok) + (not solution_ok)
             initial = "fails (expected)" if initial_ok else "PASSES (UNEXPECTED)"
             solution = "passes" if solution_ok else "MISSING OR FAILING"

@@ -102,8 +102,10 @@ A run succeeds only if all of these hold after the last turn:
   the **hidden** verification tests exits with code 0;
 - its JUnit report shows at least one test and no failure, error or skip (exit code 0 alone is not
   trusted: code under test can call `os._exit(0)`);
-- for test-writing tasks, the agent's tests fail on every **mutant** shipped with the task (an
-  emptied test is reported as `weak_tests`).
+- for test-writing tasks, at least one of the agent's own tests fails on every **mutant** shipped
+  with the task (an emptied test is reported as `weak_tests`). Each mutant runs from a fresh copy
+  of the agent's repository, at the same path and with the same command as the real run, which is
+  repeated last: a test cannot tell a mutant from the real code by where, how or when it runs.
 
 ### Task corpus
 
@@ -169,11 +171,26 @@ tests/        harness tests, including adversarial verification tests
 docs/         task and result formats, benchmark results, original design notes
 ```
 
+<!-- PATTERN-DESIGN-START -->
+### Design
+
+- **One adapter for Ollama.** `agent/ollama.py` is the only code that speaks HTTP to Ollama. It maps failures to
+  typed exceptions, so a model that aborts its own generation is scored as a failure, while a server that is down
+  is excluded from the scores.
+- **Actions as data.** The six actions are frozen dataclasses. `WorkspaceExecutor.execute` is their single dispatch
+  point. The model chooses an action, but the test command always comes from the task manifest.
+- **One owner for the results.** `ResultStore` holds the SQLite schema and every write; the dashboard only reads.
+- **Fakes, not mocks.** The Ollama client and the store are passed in through constructors. The tests drive the
+  agent loop with scripted clients and a loopback HTTP server.
+
+Contributor and agent conventions, including known design debt, are in [AGENTS.md](AGENTS.md).
+<!-- PATTERN-DESIGN-END -->
+
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                     # 131 tests, about 2 minutes
+pytest                     # 145 tests, about 2 minutes
 ruff check .
 ```
 

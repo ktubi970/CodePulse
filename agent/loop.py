@@ -170,8 +170,9 @@ def run_agent(
             messages.append({"role": "user", "content": obs_text})
 
         # Mandatory final verification
-        final_test = executor.final_test()
-        surviving_mutants = executor.surviving_mutants() if final_test.passed else []
+        verification = executor.verify()
+        final_test = verification.test
+        surviving_mutants = verification.surviving_mutants
         final_patch = executor.final_diff()
         test_runs = executor.test_run_count + 1
 

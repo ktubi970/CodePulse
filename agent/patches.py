@@ -1,5 +1,6 @@
+from collections.abc import Callable
 import difflib
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import subprocess
 from typing import Mapping
 
@@ -42,7 +43,11 @@ def snapshot_tree(root: Path) -> dict[str, bytes]:
     return snapshot
 
 
-def validate_patch(patch: str, max_bytes: int = 262144) -> tuple[str, ...]:
+# A rename or copy reads a source path that `git apply --numstat` does not report.
+FORBIDDEN_HEADERS = ("rename from ", "rename to ", "copy from ", "copy to ")
+
+
+def validate_patch(patch: str, max_bytes: int = 262144) -> None:
     if not isinstance(patch, str) or not patch.strip():
         raise PatchError("Patch must be a non-empty string")
 
@@ -54,76 +59,55 @@ def validate_patch(patch: str, max_bytes: int = 262144) -> tuple[str, ...]:
         if marker in patch:
             raise PatchError(f"Patch contains forbidden header/binary marker: '{marker}'")
 
-    changed_files: set[str] = set()
-    lines = patch.splitlines()
+    for line in patch.splitlines():
+        if line.startswith(FORBIDDEN_HEADERS):
+            raise PatchError(f"Patch renames or copies files, which is not supported: '{line}'")
 
-    for line in lines:
-        if line.startswith("--- ") or line.startswith("+++ "):
-            target = line[4:].strip()
-            if "\t" in target:
-                target = target.split("\t")[0]
 
-            if target == "/dev/null":
-                continue
+def _git_apply(root: Path, patch: str, *options: str) -> str:
+    try:
+        proc = subprocess.run(
+            ["git", "apply", *options, "--whitespace=nowarn", "-"],
+            cwd=root.resolve(),
+            input=patch.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            timeout=10,
+            check=False,
+        )
+    except Exception as err:
+        raise PatchError(f"Failed to execute git apply {' '.join(options)}: {err}") from err
 
-            # Strip standard git patch prefixes (a/ or b/)
-            if target.startswith("a/") or target.startswith("b/"):
-                target = target[2:]
+    if proc.returncode != 0:
+        err_msg = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise PatchError(f"git apply {' '.join(options)} failed: {err_msg}")
+    return proc.stdout.decode("utf-8", errors="replace")
 
-            posix_path = PurePosixPath(target.replace("\\", "/"))
-            if posix_path.is_absolute() or ".." in posix_path.parts:
-                raise PatchError(f"Patch references invalid or traversing path: '{target}'")
 
-            changed_files.add(posix_path.as_posix())
-
-    if not changed_files:
+def patch_paths(root: Path, patch: str) -> tuple[str, ...]:
+    """Every path the patch creates, modifies or deletes, as `git apply` itself reads it."""
+    paths: set[str] = set()
+    for record in _git_apply(root, patch, "--numstat", "-z").split("\0"):
+        if not record:
+            continue
+        fields = record.split("\t")
+        if len(fields) != 3 or not fields[2]:
+            raise PatchError(f"Unexpected git apply --numstat record: {record!r}")
+        paths.add(fields[2])
+    if not paths:
         raise PatchError("Patch does not specify any file changes")
+    return tuple(sorted(paths))
 
-    return tuple(sorted(changed_files))
 
-
-def apply_patch(root: Path, patch: str) -> tuple[str, ...]:
-    changed_paths = validate_patch(patch)
-    root_resolved = root.resolve()
-
-    # Pre-check dry run
-    try:
-        check = subprocess.run(
-            ["git", "apply", "--check", "--whitespace=nowarn", "-"],
-            cwd=root_resolved,
-            input=patch.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=False,
-            timeout=10,
-            check=False,
-        )
-    except Exception as err:
-        raise PatchError(f"Failed to execute git apply --check: {err}") from err
-
-    if check.returncode != 0:
-        err_msg = check.stderr.decode("utf-8", errors="replace").strip()
-        raise PatchError(f"git apply --check failed: {err_msg}")
-
-    # Actual application
-    try:
-        apply_res = subprocess.run(
-            ["git", "apply", "--whitespace=nowarn", "-"],
-            cwd=root_resolved,
-            input=patch.encode("utf-8"),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=False,
-            timeout=10,
-            check=False,
-        )
-    except Exception as err:
-        raise PatchError(f"Failed to execute git apply: {err}") from err
-
-    if apply_res.returncode != 0:
-        err_msg = apply_res.stderr.decode("utf-8", errors="replace").strip()
-        raise PatchError(f"git apply failed: {err_msg}")
-
+def apply_patch(root: Path, patch: str, check_path: Callable[[str], object]) -> tuple[str, ...]:
+    """Apply a unified diff once `check_path` has accepted every path it touches."""
+    validate_patch(patch)
+    changed_paths = patch_paths(root, patch)
+    for path in changed_paths:
+        check_path(path)
+    _git_apply(root, patch, "--check")
+    _git_apply(root, patch)
     return changed_paths
 
 
