@@ -7,7 +7,7 @@ from agent.protocol import ProtocolError, relative_path
 
 
 def test_apply_patch_changes_only_declared_relative_file(tmp_path: Path) -> None:
-    (tmp_path / "a.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "a.py").write_bytes(b"value = 1\n")  # write_text would add \r on Windows
     changed = apply_patch(
         tmp_path,
         "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-value = 1\n+value = 2\n",
@@ -18,7 +18,7 @@ def test_apply_patch_changes_only_declared_relative_file(tmp_path: Path) -> None
 
 
 def test_apply_patch_checks_every_path_git_would_touch(tmp_path: Path) -> None:
-    (tmp_path / "old.py").write_text("old = 1\n", encoding="utf-8")
+    (tmp_path / "old.py").write_bytes(b"old = 1\n")
     checked: list[str] = []
     patch = (
         "--- /dev/null\n+++ b/new.py\n@@ -0,0 +1 @@\n+new = 1\n"
@@ -57,3 +57,24 @@ def test_final_diff_includes_created_and_deleted_text_files(tmp_path: Path) -> N
     diff = build_final_diff(before, snapshot_tree(tmp_path))
     assert "--- a/old.py" in diff
     assert "+++ b/new.py" in diff
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param({"a.py": b"x = 1\n"}, {"a.py": b"x = 1"}, id="final newline removed"),
+        pytest.param({"a.py": b"x = 1"}, {"a.py": b"x = 1\n"}, id="final newline added"),
+        pytest.param({"a.py": b"a\nx = 1"}, {"a.py": b"a\nx = 2"}, id="last line changed without newline"),
+        pytest.param({}, {"new.py": b"x = 1"}, id="new file without newline"),
+        pytest.param({"old.py": b"x = 1"}, {}, id="deleted file without newline"),
+        pytest.param({"a.py": b"a\x0cb\nc\rd\n"}, {"a.py": b"a\x0cb\nc\rd\ne\n"}, id="form feed and lone CR"),
+    ],
+)
+def test_final_diff_replays_with_git_apply(
+    tmp_path: Path, before: dict[str, bytes], after: dict[str, bytes]
+) -> None:
+    # The stored final_patch is the audit trail of a run: git apply must rebuild the exact bytes.
+    for name, data in before.items():
+        (tmp_path / name).write_bytes(data)
+    apply_patch(tmp_path, build_final_diff(before, after), check_path=relative_path)
+    assert snapshot_tree(tmp_path) == after
