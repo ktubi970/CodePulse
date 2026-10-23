@@ -1,8 +1,12 @@
 from typing import Any
 
+from plotly.colors import qualitative
 import plotly.graph_objects as go
 
 from dashboard.data import HeatmapMatrix
+
+# 24 distinct colours: Plotly's default cycle repeats after 10 models.
+PALETTE = qualitative.Dark24
 
 
 def ranking_figure(rows: list[dict[str, Any]]) -> go.Figure:
@@ -21,7 +25,8 @@ def ranking_figure(rows: list[dict[str, Any]]) -> go.Figure:
             y=models,
             orientation="h",
             text=[f"{r:.1f}% ({c} runs)" for r, c in zip(rates, counts, strict=True)],
-            textposition="auto",
+            textposition="outside",  # keeps 0% rows labelled
+            cliponaxis=False,
             marker_color="#2b5c8f",
         )
     )
@@ -30,7 +35,7 @@ def ranking_figure(rows: list[dict[str, Any]]) -> go.Figure:
         title="Model Ranking by Benchmark Success Rate (%)",
         xaxis_title="Success Rate (%)",
         yaxis_title="Model Tag",
-        xaxis=dict(range=[0, 105]),
+        xaxis=dict(range=[0, 125]),
         height=max(300, len(models) * 40),
         margin=dict(l=20, r=20, t=40, b=20),
     )
@@ -51,10 +56,10 @@ def scatter_figure(rows: list[dict[str, Any]]) -> go.Figure:
                 y=[r["success_rate"] * 100.0],
                 mode="markers",
                 name=r["model"],
-                marker=dict(size=13),
+                marker=dict(size=13, color=PALETTE[i % len(PALETTE)]),
                 hovertemplate=f"{r['model']}<br>%{{y:.0f}}% solved<br>median %{{x:.1f}} s<extra></extra>",
             )
-            for r in rows
+            for i, r in enumerate(rows)
         ]
     )
     fig.update_layout(
