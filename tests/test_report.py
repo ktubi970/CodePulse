@@ -49,6 +49,14 @@ def test_report_excludes_infrastructure_failures_from_scores(tmp_path: Path) -> 
     assert "1 run excluded" in report
 
 
+def test_report_counts_generation_errors_against_the_model(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    _record(store, "big:3b", "task_c", "generation_error", 1.0)
+    report = render_markdown(store.finished_runs())
+    assert "| 1 | `big:3b` | 2/3 | 67% |" in report
+    assert "excluded" not in report
+
+
 def test_report_handles_empty_database(tmp_path: Path) -> None:
     assert "No finished runs" in render_markdown(ResultStore(tmp_path / "empty.sqlite3").finished_runs())
 

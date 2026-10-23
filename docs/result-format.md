@@ -19,7 +19,7 @@ Stores top-level metadata and authoritative test results for each benchmark run.
 | `instruction` | TEXT | Full instruction prompt |
 | `created_at` | TEXT (ISO-8601) | Run start timestamp |
 | `finished_at` | TEXT (ISO-8601) | Run completion timestamp |
-| `status` | TEXT | Terminal status: `success`, `tests_failed`, `test_timeout`, `weak_tests` (agent tests miss a mutant), `invalid_test_report` (pytest exited 0 without a clean JUnit report), `response_timeout` (one model reply exceeded `response_timeout_s`), `run_timeout`, `ollama_unavailable` |
+| `status` | TEXT | Terminal status: `success`, `tests_failed`, `test_timeout`, `weak_tests` (agent tests miss a mutant), `invalid_test_report` (pytest exited 0 without a clean JUnit report), `response_timeout` (one model reply exceeded `response_timeout_s`), `generation_error` (Ollama answered with an error, e.g. a generation aborted for repeating tokens), `run_timeout`, `ollama_unavailable` (server unreachable; excluded from model scores) |
 | `success` | INTEGER (0/1) | Final pytest exit code 0, JUnit report with at least one test and no failure, error or skip, and no surviving mutant |
 | `duration_s` | REAL | Total execution duration in seconds |
 | `turns` | INTEGER | Number of turns consumed |

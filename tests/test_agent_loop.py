@@ -2,7 +2,7 @@ from collections import deque
 from pathlib import Path
 
 from agent.loop import run_agent
-from agent.ollama import OllamaModel, OllamaReply, OllamaTimeout
+from agent.ollama import OllamaModel, OllamaReply, OllamaRequestError, OllamaTimeout
 from runner.config import BudgetConfig
 from runner.manifests import load_manifest
 from runner.storage import ResultStore
@@ -97,6 +97,22 @@ def test_response_timeout_has_its_own_status(tmp_path: Path) -> None:
         store=ResultStore(tmp_path / "runs.sqlite3"),
     )
     assert outcome.status == "response_timeout"
+
+
+def test_aborted_generation_counts_against_the_model(tmp_path: Path) -> None:
+    class LoopingClient:
+        def chat(self, **kwargs: object) -> OllamaReply:
+            raise OllamaRequestError('HTTP 500: {"error":"prediction aborted, token repeat limit reached"}')
+
+    outcome = run_agent(
+        client=LoopingClient(),
+        model=OllamaModel("local:test", "abc", "1B", "Q4"),
+        ollama_version="0.test",
+        manifest=load_manifest(write_task(tmp_path)),
+        budget=BudgetConfig(),
+        store=ResultStore(tmp_path / "runs.sqlite3"),
+    )
+    assert outcome.status == "generation_error"
 
 
 def test_immediate_finish_fails_if_tests_fail(tmp_path: Path) -> None:

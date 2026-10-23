@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from agent.ollama import ModelMissing, OllamaClient, OllamaTimeout
+from agent.ollama import ModelMissing, OllamaClient, OllamaRequestError, OllamaTimeout, OllamaUnavailable
 from runner.config import ConfigError
 
 
@@ -45,6 +45,13 @@ class MockOllamaHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/chat":
             if data.get("model") == "slow:test":
                 time.sleep(2)
+            if data.get("model") == "loop:test":
+                body = b'{"error":"prediction aborted, token repeat limit reached"}'
+                self.send_response(500)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             payload = {
                 "model": data.get("model"),
                 "message": {"role": "assistant", "content": '{"action":"list_files"}'},
@@ -115,6 +122,19 @@ def test_chat_timeout_is_reported_as_timeout(server_url: str) -> None:
     client = OllamaClient(server_url, timeout_seconds=0.3)
     with pytest.raises(OllamaTimeout):
         client.chat(model="slow:test", messages=[{"role": "user", "content": "hello"}])
+
+
+def test_error_response_is_not_an_outage(server_url: str) -> None:
+    # The server answered: the request failed, not the infrastructure.
+    client = OllamaClient(server_url, timeout_seconds=1)
+    with pytest.raises(OllamaRequestError, match="token repeat limit") as exc_info:
+        client.chat(model="loop:test", messages=[{"role": "user", "content": "hello"}])
+    assert not isinstance(exc_info.value, OllamaUnavailable)
+
+
+def test_refused_connection_is_an_outage() -> None:
+    with pytest.raises(OllamaUnavailable):
+        OllamaClient("http://127.0.0.1:9", timeout_seconds=1).version()
 
 
 def test_load_model_preloads_without_prompt(server_url: str) -> None:

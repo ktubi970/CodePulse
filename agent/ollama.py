@@ -31,6 +31,10 @@ class OllamaTimeout(OllamaUnavailable):
     pass
 
 
+class OllamaRequestError(RuntimeError):
+    """The server answered with an error, e.g. a generation aborted for repeating tokens."""
+
+
 class ModelMissing(RuntimeError):
     pass
 
@@ -52,12 +56,12 @@ class OllamaClient:
             raw_data = response.read(4 * 1024 * 1024)  # 4 MiB max
 
             if response.status != 200:
-                raise OllamaUnavailable(
+                raise OllamaRequestError(
                     f"Ollama server returned HTTP {response.status}: {raw_data.decode('utf-8', errors='replace')}"
                 )
 
             return json.loads(raw_data.decode("utf-8"))
-        except OllamaUnavailable:
+        except (OllamaUnavailable, OllamaRequestError):
             raise
         except TimeoutError as err:
             raise OllamaTimeout(

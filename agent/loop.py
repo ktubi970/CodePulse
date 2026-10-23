@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from agent.executor import ActionResult, TestResult, WorkspaceExecutor
-from agent.ollama import OllamaModel, OllamaTimeout
+from agent.ollama import OllamaModel, OllamaRequestError, OllamaTimeout
 from agent.prompt import bounded_observation, build_system_prompt, build_task_prompt
 from agent.protocol import Finish, ProtocolError, action_json_schema, parse_action
 from runner.config import BudgetConfig
@@ -98,6 +98,12 @@ def run_agent(
                 )
             except OllamaTimeout as err:
                 terminal_status = "response_timeout"
+                error_type = type(err).__name__
+                error_message = str(err)
+                break
+            except OllamaRequestError as err:
+                # Reachable server, failed generation (e.g. token repeat limit): the model's failure.
+                terminal_status = "generation_error"
                 error_type = type(err).__name__
                 error_message = str(err)
                 break
