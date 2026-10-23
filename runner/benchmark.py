@@ -1,25 +1,24 @@
-from pathlib import Path
 from typing import Any
 
+from agent.executor import check_test_runtime
 from agent.loop import RunOutcome, run_agent
-from agent.ollama import OllamaClient, OllamaModel
-from runner.config import AppConfig, load_config
-from runner.manifests import TaskManifest, discover_tasks
+from agent.ollama import OllamaClient, OllamaUnavailable
+from runner.config import AppConfig
+from runner.manifests import discover_tasks
 from runner.storage import ResultStore
 
 
 class BenchmarkRunner:
     def __init__(self, config: AppConfig, client: Any | None = None) -> None:
+        check_test_runtime()
         self.config = config
         self.store = ResultStore(config.result_db)
-        self.client = client if client is not None else OllamaClient(config.ollama.base_url)
-
-        # Discover tasks
-        tasks_root = (config.result_db.parent.parent / "tasks").resolve()
-        if not tasks_root.is_dir():
-            tasks_root = Path("tasks").resolve()
-
-        self.discovered_tasks = discover_tasks(tasks_root)
+        self.client = (
+            client
+            if client is not None
+            else OllamaClient(config.ollama.base_url, timeout_seconds=config.budget.response_timeout_s)
+        )
+        self.discovered_tasks = discover_tasks(config.tasks_dir)
         self.ollama_version = "unknown"
         try:
             self.ollama_version = self.client.version()
@@ -32,11 +31,9 @@ class BenchmarkRunner:
 
         manifest = self.discovered_tasks[task_id]
 
-        # Require installed model tag (or fallback mock)
-        if hasattr(self.client, "require_model"):
-            model = self.client.require_model(model_tag)
-        else:
-            model = OllamaModel(name=model_tag, digest="mock", parameter_size="1B", quantization="Q4")
+        model = self.client.require_model(model_tag)
+        # Load weights now so model start-up time is not charged to the first timed turn.
+        self.client.load_model(model.name)
 
         return run_agent(
             client=self.client,
@@ -63,6 +60,10 @@ class BenchmarkRunner:
                     print(f"[{model_tag}] [{task_id}] -> {status_symbol} ({outcome.duration_s:.2f}s)")
                 except KeyboardInterrupt:
                     print("\nBatch execution cancelled by user.")
+                    raise
+                except OllamaUnavailable as err:
+                    # Every remaining run would fail the same way; stop instead of recording noise.
+                    print(f"[{model_tag}] [{task_id}] -> Ollama unavailable, stopping batch: {err}")
                     raise
                 except Exception as err:
                     print(f"[{model_tag}] [{task_id}] -> ERROR: {err}")

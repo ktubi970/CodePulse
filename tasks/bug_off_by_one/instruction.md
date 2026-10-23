@@ -1,2 +1,2 @@
-Corriger la fonction `window(values, start, width)` dans `repo/src/window.py`.
-Actuellement, elle inclut un élément en trop à la fin de la fenêtre. La fonction doit retourner exactement `width` éléments à partir de l'index `start`.
+Fix `window(values, start, width)` in `src/window.py`.
+It currently includes one extra element at the end of the window. It must return exactly `width` elements starting at index `start`.

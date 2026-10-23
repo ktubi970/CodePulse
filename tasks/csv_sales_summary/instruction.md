@@ -1,1 +1,1 @@
-Implémenter `summarize_sales(csv_text: str) -> str` dans `repo/src/sales.py` pour agréger les revenus (quantity * unit_price) par SKU et produire un CSV 'sku,revenue' trié par SKU.
+Implement `summarize_sales(csv_text: str) -> str` in `src/sales.py`: sum the revenue (quantity * unit_price) per SKU and return CSV with a 'sku,revenue' header, sorted by SKU, with revenue formatted to two decimals.

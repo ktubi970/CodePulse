@@ -1,5 +1,19 @@
 # CodePulse Local — Design
 
+> **Original design document (July 2026).** Kept to show the initial reasoning.
+> The first benchmark built from it scored 0/218 runs, and several decisions
+> changed as a result. Where this document and the code disagree, the code and
+> the [README](../README.md) are authoritative. Main changes since:
+>
+> - a sixth action, `write_file`, because small models could not produce valid
+>   unified diffs (0 of 352 applied);
+> - the parser accepts every field the JSON schema allows instead of rejecting
+>   extra ones;
+> - success requires a clean JUnit report from an isolated `python -I` pytest run
+>   with `--noconftest`, not only exit code zero;
+> - every task ships a reference solution, and test-writing tasks ship mutants;
+> - task instructions are in English and use repository-relative paths.
+
 ## 1. Purpose and scope
 
 CodePulse Local is a reproducible, visual benchmark for small language

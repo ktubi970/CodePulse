@@ -31,3 +31,11 @@ tmp/
 Thumbs.db
 .vscode/
 .idea/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Local agent tooling (machine-specific paths)
+.claude/

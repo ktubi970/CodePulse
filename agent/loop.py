@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from agent.executor import ActionResult, TestResult, WorkspaceExecutor
-from agent.ollama import OllamaClient, OllamaModel
+from agent.ollama import OllamaModel, OllamaRequestError, OllamaTimeout
 from agent.prompt import bounded_observation, build_system_prompt, build_task_prompt
 from agent.protocol import Finish, ProtocolError, action_json_schema, parse_action
 from runner.config import BudgetConfig
@@ -96,6 +96,17 @@ def run_agent(
                     max_output_tokens=budget.max_output_tokens,
                     response_schema=schema,
                 )
+            except OllamaTimeout as err:
+                terminal_status = "response_timeout"
+                error_type = type(err).__name__
+                error_message = str(err)
+                break
+            except OllamaRequestError as err:
+                # Reachable server, failed generation (e.g. token repeat limit): the model's failure.
+                terminal_status = "generation_error"
+                error_type = type(err).__name__
+                error_message = str(err)
+                break
             except Exception as err:
                 terminal_status = "ollama_unavailable"
                 error_type = type(err).__name__
@@ -160,18 +171,27 @@ def run_agent(
 
         # Mandatory final verification
         final_test = executor.final_test()
+        surviving_mutants = executor.surviving_mutants() if final_test.passed else []
         final_patch = executor.final_diff()
         test_runs = executor.test_run_count + 1
 
         total_duration = time.monotonic() - start_time
 
-        success = (final_test.exit_code == 0) and not final_test.timed_out
+        success = final_test.passed and not surviving_mutants
         if success:
             status = "success"
         elif terminal_status:
             status = terminal_status
         elif final_test.timed_out:
             status = "test_timeout"
+        elif final_test.exit_code == 0 and not final_test.passed:
+            status = "invalid_test_report"
+            error_type = "InvalidTestReport"
+            error_message = f"pytest exited 0 without a clean JUnit report: {final_test.report}"
+        elif surviving_mutants:
+            status = "weak_tests"
+            error_type = "WeakTests"
+            error_message = f"Agent tests did not detect mutants: {', '.join(surviving_mutants)}"
         else:
             status = "tests_failed"
 

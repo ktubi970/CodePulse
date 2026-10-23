@@ -35,6 +35,14 @@ run_timeout_s = 1800.0
     assert config.tasks == ("bug_off_by_one",)
     assert config.budget.max_turns == 12
     assert config.result_db == (tmp_path / "results/test.sqlite3").resolve()
+    assert config.tasks_dir == (tmp_path / "tasks").resolve()
+    assert config.budget.response_timeout_s == 120.0
+
+
+def test_load_config_resolves_custom_tasks_dir(tmp_path: Path) -> None:
+    path = tmp_path / "codepulse.toml"
+    path.write_text('[benchmark]\nmodels = ["m"]\ntasks_dir = "corpus"\n', encoding="utf-8")
+    assert load_config(path).tasks_dir == (tmp_path / "corpus").resolve()
 
 
 def test_load_config_rejects_non_loopback_endpoint(tmp_path: Path) -> None:

@@ -1,3 +1,3 @@
 def slugify(text: str) -> str:
-    # Non implémenté
+    # Not implemented
     raise NotImplementedError()

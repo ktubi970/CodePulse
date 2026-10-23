@@ -1,0 +1,5 @@
+# Task files are benchmark inputs (file sizes appear in the agent prompt):
+# keep LF on every platform so prompts are byte-identical on Windows and Linux.
+* text=auto eol=lf
+*.png binary
+*.sqlite3 binary

@@ -4,28 +4,33 @@ from runner.manifests import TaskManifest
 
 def build_system_prompt(budget: BudgetConfig) -> str:
     return f"""You are an autonomous Python coding agent.
-Your objective is to solve the task described below by inspecting files, editing code with patch diffs, and verifying your work with unit tests.
+Your objective is to solve the task described below by inspecting files, editing code, and verifying your work with unit tests.
 
-You must respond ONLY with a single JSON object conforming to one of these 5 action schemas:
+You must respond ONLY with a single JSON object conforming to one of these 6 action schemas:
 
 1. List repository files:
 {{"action": "list_files"}}
 
 2. Read a file:
-{{"action": "read_file", "path": "relative/path/to/file.py"}}
+{{"action": "read_file", "path": "src/file.py"}}
 
-3. Apply a unified diff patch to edit files:
-{{"action": "apply_patch", "patch": "--- a/file.py\\n+++ b/file.py\\n@@ -1,2 +1,2 @@\\n-old line\\n+new line\\n"}}
+3. Replace a whole file with new content (preferred way to edit code):
+{{"action": "write_file", "path": "src/file.py", "content": "def add(a, b):\\n    return a + b\\n"}}
 
-4. Run task unit tests:
+4. Apply a unified diff patch (only if you can produce an exact diff):
+{{"action": "apply_patch", "patch": "--- a/src/file.py\\n+++ b/src/file.py\\n@@ -1,2 +1,2 @@\\n-old line\\n+new line\\n"}}
+
+5. Run task unit tests:
 {{"action": "run_tests"}}
 
-5. Finish interaction:
+6. Finish interaction:
 {{"action": "finish", "summary": "Brief explanation of your fix"}}
 
 STRICT RULES:
 - Output ONLY raw JSON. Do NOT wrap your output in Markdown code blocks (```json ... ```).
 - Output exactly ONE action JSON object per turn.
+- Paths are relative to the repository root shown in the file listing (for example "src/file.py").
+- write_file replaces the entire file: always send the complete new content.
 - No general shell access or arbitrary command execution is available.
 - You have a budget of at most {budget.max_turns} turns.
 - 'finish' is advisory; final evaluation will run fresh pytest execution independently.
@@ -45,7 +50,8 @@ INITIAL REPOSITORY FILES:
 """
 
 
-def bounded_observation(obs_str: str, max_bytes: int = 98304) -> str:
+def bounded_observation(obs_str: str, max_bytes: int = 16384) -> str:
+    # 16 KiB is roughly 4k tokens: half of the default 8192-token context.
     obs_bytes = obs_str.encode("utf-8")
     if len(obs_bytes) <= max_bytes:
         return obs_str

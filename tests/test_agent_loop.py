@@ -2,7 +2,7 @@ from collections import deque
 from pathlib import Path
 
 from agent.loop import run_agent
-from agent.ollama import OllamaModel, OllamaReply
+from agent.ollama import OllamaModel, OllamaReply, OllamaRequestError, OllamaTimeout
 from runner.config import BudgetConfig
 from runner.manifests import load_manifest
 from runner.storage import ResultStore
@@ -52,6 +52,67 @@ def test_agent_success_requires_fresh_final_test(tmp_path: Path) -> None:
     assert outcome.success is True
     assert outcome.final_test.exit_code == 0
     assert outcome.test_runs == 1
+
+
+def test_agent_can_solve_task_with_write_file(tmp_path: Path) -> None:
+    task = write_task(tmp_path)
+    (task / "repo" / "value.py").write_text("value = 1\n", encoding="utf-8")
+    tests = task / "repo" / "tests"
+    tests.mkdir(exist_ok=True)
+    (tests / "test_value.py").write_text(
+        "from value import value\n\ndef test_value(): assert value == 2\n",
+        encoding="utf-8",
+    )
+    client = ScriptedClient(
+        [
+            '{"action":"write_file","path":"value.py","content":"value = 2\\n","summary":"fix"}',
+            '{"action":"finish"}',
+        ]
+    )
+
+    outcome = run_agent(
+        client=client,
+        model=OllamaModel("local:test", "abc", "1B", "Q4"),
+        ollama_version="0.test",
+        manifest=load_manifest(task),
+        budget=BudgetConfig(),
+        store=ResultStore(tmp_path / "runs.sqlite3"),
+    )
+
+    assert outcome.success is True
+    assert "+value = 2" in outcome.final_patch
+
+
+def test_response_timeout_has_its_own_status(tmp_path: Path) -> None:
+    class SlowClient:
+        def chat(self, **kwargs: object) -> OllamaReply:
+            raise OllamaTimeout("timed out after 120s")
+
+    outcome = run_agent(
+        client=SlowClient(),
+        model=OllamaModel("local:test", "abc", "1B", "Q4"),
+        ollama_version="0.test",
+        manifest=load_manifest(write_task(tmp_path)),
+        budget=BudgetConfig(),
+        store=ResultStore(tmp_path / "runs.sqlite3"),
+    )
+    assert outcome.status == "response_timeout"
+
+
+def test_aborted_generation_counts_against_the_model(tmp_path: Path) -> None:
+    class LoopingClient:
+        def chat(self, **kwargs: object) -> OllamaReply:
+            raise OllamaRequestError('HTTP 500: {"error":"prediction aborted, token repeat limit reached"}')
+
+    outcome = run_agent(
+        client=LoopingClient(),
+        model=OllamaModel("local:test", "abc", "1B", "Q4"),
+        ollama_version="0.test",
+        manifest=load_manifest(write_task(tmp_path)),
+        budget=BudgetConfig(),
+        store=ResultStore(tmp_path / "runs.sqlite3"),
+    )
+    assert outcome.status == "generation_error"
 
 
 def test_immediate_finish_fails_if_tests_fail(tmp_path: Path) -> None:

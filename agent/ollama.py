@@ -27,6 +27,14 @@ class OllamaUnavailable(RuntimeError):
     pass
 
 
+class OllamaTimeout(OllamaUnavailable):
+    pass
+
+
+class OllamaRequestError(RuntimeError):
+    """The server answered with an error, e.g. a generation aborted for repeating tokens."""
+
+
 class ModelMissing(RuntimeError):
     pass
 
@@ -37,27 +45,32 @@ class OllamaClient:
         parts = urlsplit(base_url)
         self._host = parts.hostname or "127.0.0.1"
         self._port = parts.port or 11434
-        self._timeout = timeout_seconds
+        self.timeout_seconds = timeout_seconds
 
     def _request(self, method: str, path: str, body: bytes | None = None) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"} if body is not None else {}
+        conn = http.client.HTTPConnection(self._host, self._port, timeout=self.timeout_seconds)
         try:
-            conn = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
             conn.request(method, path, body=body, headers=headers)
             response = conn.getresponse()
             raw_data = response.read(4 * 1024 * 1024)  # 4 MiB max
-            conn.close()
 
             if response.status != 200:
-                raise OllamaUnavailable(
+                raise OllamaRequestError(
                     f"Ollama server returned HTTP {response.status}: {raw_data.decode('utf-8', errors='replace')}"
                 )
 
             return json.loads(raw_data.decode("utf-8"))
+        except (OllamaUnavailable, OllamaRequestError):
+            raise
+        except TimeoutError as err:
+            raise OllamaTimeout(
+                f"Ollama did not answer {method} {path} within {self.timeout_seconds}s"
+            ) from err
         except Exception as err:
-            if isinstance(err, (OllamaUnavailable, ModelMissing)):
-                raise
             raise OllamaUnavailable(f"Ollama communication error at {self._host}:{self._port}: {err}") from err
+        finally:
+            conn.close()
 
     def version(self) -> str:
         data = self._request("GET", "/api/version")
@@ -80,14 +93,16 @@ class OllamaClient:
         return tuple(models)
 
     def require_model(self, model_tag: str) -> OllamaModel:
-        models = self.list_models()
-        for m in models:
-            if m.name == model_tag:
-                return m
-            # Also match without tag if default latest is implied
-            if ":" not in m.name and f"{m.name}:latest" == model_tag:
+        # /api/tags always reports full tags; a bare name means the ":latest" tag.
+        wanted = model_tag if ":" in model_tag else f"{model_tag}:latest"
+        for m in self.list_models():
+            if m.name == wanted:
                 return m
         raise ModelMissing(f"Configured model tag '{model_tag}' is absent from local Ollama library")
+
+    def load_model(self, model: str) -> None:
+        """Load the weights before the first timed turn (a generate request without prompt)."""
+        self._request("POST", "/api/generate", body=json.dumps({"model": model}).encode("utf-8"))
 
     def chat(
         self,
